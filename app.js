@@ -270,7 +270,9 @@
     if (!S.mes) S.mes = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
     var m = S.mes, primero = new Date(m.getFullYear(), m.getMonth(), 1);
     var inicio = new Date(primero); inicio.setDate(1 - ((primero.getDay() + 6) % 7));
-    var acts = ordenar(activas()), canc = reservas().filter(function (r) { return r.estado === 'Cancelada'; });
+    var hoyT = hoyTxt();
+    var acts = ordenar(activas().filter(function (r) { return r.salida >= hoyT; }));
+    var canc = reservas().filter(function (r) { return r.estado === 'Cancelada' && r.salida >= hoyT; });
     var semanas = '';
     for (var w = 0; w < 6; w++) {
       var lunes = new Date(inicio); lunes.setDate(inicio.getDate() + w * 7);
@@ -281,8 +283,8 @@
       // Celdas de días
       var celdas = dias.map(function (t, i) {
         var d = aFecha(t);
-        var cs = canc.filter(function (r) { return t >= r.entrada && t <= r.salida; });
-        var cls = 'cdia' + (d.getMonth() !== m.getMonth() ? ' fuera' : '') + (t === hoyTxt() ? ' hoy' : '') + (i >= 5 ? ' fsem' : '');
+        var cs = t >= hoyT ? canc.filter(function (r) { return t >= r.entrada && t <= r.salida; }) : [];
+        var cls = 'cdia' + (d.getMonth() !== m.getMonth() ? ' fuera' : '') + (t === hoyT ? ' hoy' : '') + (t < hoyT ? ' pasado' : '') + (i >= 5 ? ' fsem' : '');
         return '<button class="' + cls + '" style="grid-column:' + (i + 1) + ';grid-row:1/-1" data-f="' + t + '"' +
           (cs.length ? ' title="Cancelada: ' + esc(cs.map(function (r) { return r.grupo; }).join(', ')) + '"' : '') + '>' +
           '<span class="n">' + d.getDate() + '</span>' + (cs.length ? '<span class="marca-canc" aria-label="Reserva cancelada">✕</span>' : '') + '</button>';
@@ -311,25 +313,14 @@
       var mas = ocultos.map(function (n, i) { return n ? '<span class="mas" style="grid-column:' + (i + 1) + ';grid-row:' + (MAXC + 2) + '">+' + n + '</span>' : ''; }).join('');
       semanas += '<div class="semana" style="grid-template-rows:22px repeat(' + Math.max(1, Math.min(carriles.length, MAXC)) + ',auto)' + (ocultos.some(Boolean) ? ' 16px' : '') + ' 4px">' + celdas + franjas + mas + '</div>';
     }
-    var finMes = aTexto(new Date(m.getFullYear(), m.getMonth() + 1, 0)), iniMes = aTexto(primero);
-    var delMes = ordenar(reservas().filter(function (r) { return r.entrada <= finMes && r.salida >= iniMes; }));
-    var activasMes = delMes.filter(function (r) { return r.estado !== 'Cancelada'; });
-    var diasOcup = {};
-    activasMes.forEach(function (r) { if (tipo(r) === 'Día / sala') return; for (var f = r.entrada; f <= r.salida; f = sumaDias(f, 1)) if (f >= iniMes && f <= finMes) diasOcup[f] = 1; });
+    var esHoy = m.getFullYear() === hoy.getFullYear() && m.getMonth() === hoy.getMonth();
     vista.innerHTML =
-      '<div class="tarjeta cal">' +
-      '<div class="mes-cab"><button class="icono" id="cAnt" aria-label="Mes anterior">‹</button><h2>' + esc(nombreMes(m)) + '</h2><button class="icono" id="cSig" aria-label="Mes siguiente">›</button></div>' +
+      '<div class="cal-solo">' +
+      '<div class="mes-cab"><button class="icono" id="cAnt" aria-label="Mes anterior">‹</button>' +
+      '<h2>' + esc(nombreMes(m)) + (esHoy ? '' : ' <button class="hoy-btn" id="cHoy">Hoy</button>') + '</h2>' +
+      '<button class="icono" id="cSig" aria-label="Mes siguiente">›</button></div>' +
       '<div class="dias-sem"><div>L</div><div>M</div><div>X</div><div>J</div><div>V</div><div>S</div><div>D</div></div>' +
-      '<div id="rejilla">' + semanas + '</div>' +
-      '<div class="leyenda"><span><i class="l-conf"></i>Confirmada</span><span><i class="l-prov"></i>Provisional</span><span><i class="l-dia"></i>Día / sala</span>' +
-      '<span><i class="l-bloq"></i>Bloqueo</span><span><i class="l-pas"></i>Pasada</span><span><b class="l-canc">✕</b> Cancelada</span>' +
-      '<span><i class="l-stel"></i>Sin teléfono</span><span><i class="l-smail"></i>Sin email</span></div>' +
-      '<p class="sub pista">Toca una franja para ver la reserva, o un día para ver todo lo de ese día.</p></div>' +
-      '<div class="kpis"><div class="kpi"><b>' + activasMes.length + '</b><span>reservas en el mes</span></div>' +
-      '<div class="kpi"><b>' + Object.keys(diasOcup).length + '</b><span>días con alojamiento</span></div>' +
-      '<div class="kpi"><b>' + capacidadDisponible() + '</b><span>plazas disponibles</span></div></div>' +
-      (delMes.length ? '<h3>Este mes</h3>' + delMes.map(tarjetaReserva).join('') : '<div class="vacio">Sin reservas este mes.</div>') +
-      (m.getFullYear() !== hoy.getFullYear() || m.getMonth() !== hoy.getMonth() ? '<button class="btn sec ancho" id="cHoy">Volver a hoy</button>' : '');
+      '<div id="rejilla">' + semanas + '</div></div>';
     $('#cAnt').onclick = function () { S.mes = new Date(m.getFullYear(), m.getMonth() - 1, 1); pintarCalendario(); };
     $('#cSig').onclick = function () { S.mes = new Date(m.getFullYear(), m.getMonth() + 1, 1); pintarCalendario(); };
     if ($('#cHoy')) $('#cHoy').onclick = function () { S.mes = null; pintarCalendario(); };
@@ -338,7 +329,13 @@
       if (f) return ir('reserva/' + encodeURIComponent(f.dataset.id));
       var b = e.target.closest('.cdia'); if (b) hojaDia(b.dataset.f);
     };
-    enlazarTarjetas();
+    // Deslizar a izquierda/derecha para cambiar de mes
+    var x0 = null;
+    $('#rejilla').addEventListener('touchstart', function (e) { x0 = e.touches[0].clientX; }, { passive: true });
+    $('#rejilla').addEventListener('touchend', function (e) {
+      if (x0 === null) return; var dx = e.changedTouches[0].clientX - x0; x0 = null;
+      if (Math.abs(dx) > 60) (dx < 0 ? $('#cSig') : $('#cAnt')).click();
+    }, { passive: true });
   }
 
   /** Hoja con todo lo de un día (también lo cancelado) y botón de nueva reserva. */
