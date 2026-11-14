@@ -3,7 +3,7 @@
   'use strict';
   var C = window.CONFIG || {};
   var DEMO = !C.API_URL;
-  var VERSION = '1.3.2';
+  var VERSION = '1.3.3';
   var S = { clave: null, gestor: null, datos: null, mes: null, sinConexion: false, filtro: 'proximas', verCanceladas: false,
             relModo: 'todas', relDesde: '', relHasta: '', findesTodos: false };
   var $ = function (s, el) { return (el || document).querySelector(s); };
@@ -17,7 +17,22 @@
   function lsDel(k) { try { localStorage.removeItem('mm:' + k); } catch (e) {} }
 
   // ---------------- Utilidades ----------------
-  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  /** «2026-11-09 00:25» (o una fecha en otro formato) → «09/11/2026 00:25». «#####» o vacío → ''. */
+function marcaLegible(v) {
+  var t = String(v || '').trim();
+  if (!t || /^#+$/.test(t)) return '';
+  var m = t.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}:\d{2}))?/);
+  if (!m) {
+    var d = new Date(t.replace(/\s*\(.*\)\s*$/, ''));
+    if (isNaN(d)) return '';
+    var dos = function (n) { return (n < 10 ? '0' : '') + n; };
+    return dos(d.getDate()) + '/' + dos(d.getMonth() + 1) + '/' + d.getFullYear() + ' ' + dos(d.getHours()) + ':' + dos(d.getMinutes());
+  }
+  return m[3] + '/' + m[2] + '/' + m[1] + (m[4] ? ' ' + m[4] : '');
+}
+function entreParen(t) { return t ? ' (' + esc(t) + ')' : ''; }
+
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   function pad(n) { return (n < 10 ? '0' : '') + n; }
   function aFecha(s) { var p = String(s).split('-'); return new Date(+p[0], +p[1] - 1, +p[2]); }
   function aTexto(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
@@ -551,8 +566,9 @@
       '<div class="fila-btns" style="margin-top:10px">' +
       (r.estado !== 'Cancelada' ? '<button class="btn peligro" id="dCancelar">Cancelar reserva</button>' : '') +
       '<button class="btn peligro borde-p" id="dBorrar">Borrar</button></div>' +
-      '<p class="sub" style="margin-top:16px;font-size:12px">Creada por ' + esc(r.creadoPor || '—') + ' (' + esc(r.creadoEl || '') + ')' +
-      (r.modificadoEl && r.modificadoEl !== r.creadoEl ? ' · Modificada por ' + esc(r.modificadoPor) + ' (' + esc(r.modificadoEl) + ')' : '') + '</p>';
+      '<p class="sub" style="margin-top:16px;font-size:12px">Creada por ' + esc(r.creadoPor || '—') + entreParen(marcaLegible(r.creadoEl)) +
+      (r.modificadoPor && (marcaLegible(r.modificadoEl) !== marcaLegible(r.creadoEl) || r.modificadoPor !== r.creadoPor)
+        ? ' · Modificada por ' + esc(r.modificadoPor) + entreParen(marcaLegible(r.modificadoEl)) : '') + '</p>';
     enlazarVolver();
     if ($('#dEditar')) $('#dEditar').onclick = function () { ir('editar/' + encodeURIComponent(r.id)); };
     function accion(nombre, texto, boton, ok) {
