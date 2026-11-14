@@ -308,3 +308,80 @@ textarea.entrada { min-height: 80px; resize: vertical; }
 .cal-solo .franja:not(.ini) { border-top-left-radius: 0; border-bottom-left-radius: 0; }
 .cal-solo .franja:not(.fin) { border-top-right-radius: 0; border-bottom-right-radius: 0; }
 @media (min-width: 700px) { .cal-solo .franja { font-size: 12.5px; } .cal-solo .cdia .n { font-size: 15px; } }
+
+/* ===================== v1.3: más contraste y barra fina ===================== */
+:root {
+  --pri: #7A1D0B; --pri-2: #9C3A22; --pri-suave: #F3E2DB;
+  --fondo: #F2EDE8; --texto: #1F1A17; --texto-2: #534A45; --linea: #D6CBC3;
+  --ok: #1F7A45; --ok-suave: #CFEBD9; --prov: #B9770E; --prov-suave: #FBE3B3;
+  --dia: #0B6E8A; --dia-suave: #CDEAF2; --bloq: #3D4652; --bloq-suave: #D7DBE1;
+  --pas: #6B717A; --pas-suave: #E3E5E8;
+  --tel: #C62828; --tel-suave: #FBDADA; --mail: #D46A00; --mail-suave: #FFE2C2;
+  --sombra: 0 1px 3px rgba(31,26,23,.12), 0 4px 12px rgba(31,26,23,.08);
+}
+body { background: var(--fondo); }
+/* Barra superior fina: solo el nombre de la vista */
+.barra { padding: calc(6px + env(safe-area-inset-top, 0px)) 14px 6px; min-height: 44px; }
+.barra .casa { display: none; }
+.barra .vista { font-size: 17px; }
+.icono { width: 34px; height: 34px; border-radius: 10px; }
+.icono svg { width: 19px; height: 19px; }
+main { padding-top: 12px; }
+.tarjeta { border: 1px solid var(--linea); }
+/* Calendario */
+.cal-solo { border: 1px solid var(--linea); }
+.cal-solo .cdia { background: #fff; border: 1px solid var(--linea); color: var(--texto); }
+.cal-solo .cdia.fsem { background: #F7EDE6; }
+.cal-solo .cdia.fuera { opacity: 1; background: #F4F1EE; color: #A39A94; }
+.cal-solo .cdia.pasado { opacity: 1; background: #ECE8E4; color: #8E857F; }
+.cal-solo .cdia .n { font-weight: 700; }
+.cal-solo .dias-sem div { color: var(--texto); font-weight: 800; }
+.mes-cab .icono { background: var(--pri); color: #fff; }
+.cal-solo .franja { background: var(--ok); color: #fff; border-left: 0; font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,.25); }
+.cal-solo .franja b { font-weight: 800; }
+.cal-solo .franja.provisional { background: #E8A317; color: #2B1D00; }
+.cal-solo .franja.dia-sala { background: var(--dia); color: #fff; }
+.cal-solo .franja.bloqueo { background: repeating-linear-gradient(45deg, #4B5563, #4B5563 6px, #5B6573 6px, #5B6573 12px); color: #fff; }
+.cal-solo .franja.pasada { background: #9AA0A8; color: #fff; }
+.cal-solo .franja .punto { box-shadow: 0 0 0 1.5px #fff; }
+.marca-canc { font-size: 12px; }
+/* Menú inferior */
+.menu { border-top: 1px solid var(--linea); box-shadow: 0 -2px 8px rgba(0,0,0,.06); }
+.menu button { color: var(--texto-2); }
+/* Lista de reservas: filas alternas y bordes marcados */
+.reserva { border: 1.5px solid var(--linea); box-shadow: none; margin-bottom: 0; border-radius: 0; background: #fff; }
+.reserva + .reserva { border-top-width: 0; }
+.reserva:nth-of-type(even) { background: #F6F0EB; }
+.reserva:first-of-type { border-radius: var(--radio) var(--radio) 0 0; }
+.reserva:last-of-type { border-radius: 0 0 var(--radio) var(--radio); margin-bottom: 12px; }
+.reserva:only-of-type { border-radius: var(--radio); }
+.reserva.sin-tel, .reserva.sin-email { background: inherit; }
+.reserva.sin-tel { box-shadow: inset 5px 0 0 var(--tel); }
+.reserva.sin-email { box-shadow: inset 5px 0 0 var(--mail); }
+.reserva.sin-tel:nth-of-type(odd), .reserva.sin-email:nth-of-type(odd) { background: #fff; }
+.reserva.sin-tel:nth-of-type(even), .reserva.sin-email:nth-of-type(even) { background: #F6F0EB; }
+.reserva .fecha { background: var(--ok); color: #fff; }
+.reserva.provisional .fecha { background: #E8A317; color: #2B1D00; }
+.reserva.dia-sala .fecha { background: var(--dia); color: #fff; }
+.reserva.bloqueo .fecha { background: var(--bloq); color: #fff; }
+.reserva.pasada .fecha { background: var(--pas); color: #fff; }
+.reserva.cancelada .fecha { background: #BDBDBD; color: #fff; }
+.reserva.pasada { opacity: 1; }
+.etiqueta { font-size: 11.5px; padding: 2px 8px; }
+.etiqueta.falta-tel { background: var(--tel); color: #fff; }
+.etiqueta.falta-email { background: var(--mail); color: #fff; }
+.etiqueta.provisional { background: #E8A317; color: #2B1D00; }
+/* Relación y fines de semana */
+.rel-item { padding: 7px 8px 7px 20px; border-bottom: 1px solid var(--linea); }
+.rel-item::before { left: 6px; }
+.rel-item:nth-of-type(even) { background: #F6F0EB; }
+.finde { border: 1.5px solid var(--linea); border-left-width: 6px; box-shadow: none; }
+.finde.provisional { background: #FFF6E2; }
+.segmento { background: #E9E2DC; border-color: var(--linea); }
+.segmento button.activo { box-shadow: 0 1px 3px rgba(0,0,0,.18); color: var(--pri); }
+.entrada, select.entrada, textarea.entrada { border-color: #C9BDB4; }
+.lista-hab .item { border-bottom-color: var(--linea); }
+.paso button { border-color: #C9BDB4; }
+/* Mantenimiento plegado */
+details.mant summary { font-weight: 700; cursor: pointer; color: var(--texto-2); }
+details.mant[open] summary { margin-bottom: 10px; color: var(--texto); }

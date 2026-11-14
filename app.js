@@ -3,7 +3,7 @@
   'use strict';
   var C = window.CONFIG || {};
   var DEMO = !C.API_URL;
-  var VERSION = '1.1.0';
+  var VERSION = '1.3.0';
   var S = { clave: null, gestor: null, datos: null, mes: null, sinConexion: false, filtro: 'proximas', verCanceladas: false,
             relPasadas: false, findesTodos: false };
   var $ = function (s, el) { return (el || document).querySelector(s); };
@@ -812,23 +812,20 @@
       '<div class="tarjeta"><h2>¿Quién eres?</h2><div class="chips" id="aGest">' +
       gestores.map(function (g) { return '<button class="chip' + (g === S.gestor ? ' activo' : '') + '">' + esc(g) + '</button>'; }).join('') +
       '</div><p class="sub" style="margin:10px 0 0">Queda anotado en cada reserva que crees o modifiques.</p></div>' +
-      '<div class="tarjeta"><h2>Datos</h2><p class="sub" style="margin-top:-6px">Última actualización: ' + (c ? new Date(c.cuando).toLocaleString('es-ES') : '—') + '</p>' +
-      '<button class="btn sec ancho" id="aRecargar">Actualizar ahora</button></div>' +
-      '<div class="tarjeta"><h2>Avisos de reservas provisionales</h2>' +
-      '<p class="sub" style="margin-top:-6px">Un mes antes de la entrada, el lunes de esa semana, la app envía un correo a <b>' + esc(aj.avisoPara || 'la cuenta de la casa') + '</b> a la atención de <b>' + esc(aj.avisoAtencion || '') + '</b> con los datos y el contacto del grupo.</p>' +
-      '<button class="btn borde ancho" id="aProbar">Enviar un aviso de prueba</button></div>' +
-      '<div class="tarjeta"><h2>Calendario de Google</h2>' +
-      '<p class="sub" style="margin-top:-6px">Importar: convierte en reservas los eventos creados a mano en el calendario. Regenerar: vuelve a crear todos los eventos desde las reservas.</p>' +
-      '<div class="fila-btns"><button class="btn borde" id="aImportar">Importar eventos</button><button class="btn borde" id="aRegenerar">Regenerar calendario</button></div></div>' +
       '<div class="tarjeta"><h2>Casa</h2>' +
       '<div class="dato"><span>Habitaciones disponibles</span><span>' + habitaciones().filter(function (h) { return h.estado === 'Disponible'; }).length + ' de ' + habitaciones().length + '</span></div>' +
       '<div class="dato"><span>Plazas disponibles</span><span>' + capacidadDisponible() + '</span></div>' +
       '<div class="dato"><span>Horario por defecto</span><span>Entrada ' + esc(aj.horaEntrada || '12:00') + ' · Salida ' + esc(aj.horaSalida || '16:00') + '</span></div></div>' +
-      (DEMO ? '<button class="btn borde ancho" id="aReiniciar" style="margin-bottom:10px">Reiniciar demostración</button>' : '') +
+      '<details class="tarjeta mant"><summary>Mantenimiento (solo administración)</summary>' +
+      '<p class="sub">Aviso de prueba: comprueba que llegan los avisos de reservas provisionales a ' + esc(aj.avisoPara || 'la cuenta de la casa') + '.</p>' +
+      '<button class="btn borde ancho" id="aProbar">Enviar un aviso de prueba</button>' +
+      '<p class="sub" style="margin-top:14px">Regenerar: vuelve a crear en Google Calendar todas las citas a partir de las reservas (si alguien ha tocado el calendario a mano).</p>' +
+      '<button class="btn borde ancho" id="aRegenerar">Regenerar calendario de Google</button>' +
+      (DEMO ? '<button class="btn borde ancho" id="aReiniciar" style="margin-top:10px">Reiniciar demostración</button>' : '') +
+      '</details>' +
       '<button class="btn peligro ancho" id="aSalir">Cerrar sesión en este móvil</button>' +
       '<p class="sub" style="text-align:center;font-size:12px;margin-top:18px">App ' + VERSION + ' · Puente ' + esc(aj.version || '1.0.0') + (DEMO ? ' · demostración' : '') + '</p>';
     $('#aGest').onclick = function (e) { var b = e.target.closest('.chip'); if (!b) return; S.gestor = b.textContent; lsSet('gestor', S.gestor); pintarAjustes(); toast('Ahora eres ' + S.gestor); };
-    $('#aRecargar').onclick = function () { recargar().then(function () { if (!S.sinConexion) toast('Datos actualizados'); }); };
     function accion(nombre, texto, fmt) {
       return function () {
         if (S.sinConexion) return toast('Sin conexión.', true);
@@ -842,8 +839,6 @@
     }
     $('#aProbar').onclick = accion('probarAviso', 'Se enviará un correo de prueba a la cuenta de la casa con el formato del aviso.',
       function (d) { return 'Aviso de prueba enviado a ' + d.para + (d.avisosProgramados ? '' : ' · ATENCIÓN: los avisos de los lunes aún no están programados'); });
-    $('#aImportar').onclick = accion('importarCalendario', 'Se convertirán en reservas los eventos del calendario que no vengan de la app.',
-      function (d) { return d.importadas + ' importadas' + (d.omitidas.length ? ' · ' + d.omitidas.length + ' omitidas' : ''); });
     $('#aRegenerar').onclick = accion('regenerarCalendario', 'Se borrarán los eventos creados por la app y se volverán a crear desde las reservas.',
       function (d) { return d.eventos + ' eventos regenerados'; });
     if ($('#aReiniciar')) $('#aReiniciar').onclick = function () {
