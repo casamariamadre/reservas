@@ -3,9 +3,9 @@
   'use strict';
   var C = window.CONFIG || {};
   var DEMO = !C.API_URL;
-  var VERSION = '1.3.0';
+  var VERSION = '1.3.2';
   var S = { clave: null, gestor: null, datos: null, mes: null, sinConexion: false, filtro: 'proximas', verCanceladas: false,
-            relPasadas: false, findesTodos: false };
+            relModo: 'todas', relDesde: '', relHasta: '', findesTodos: false };
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var $$ = function (s, el) { return Array.prototype.slice.call((el || document).querySelectorAll(s)); };
   var vista = $('#vista');
@@ -211,10 +211,11 @@
     var r = ruta();
     $('#menu').hidden = false; $('#btnRecargar').hidden = false;
     $('#tituloVista').textContent = TITULOS[r.vista] || '';
+    document.body.setAttribute('data-vista', r.vista);
     $$('.menu button').forEach(function (b) {
       b.classList.toggle('activo', b.dataset.ir === r.vista || (b.dataset.ir === 'reservas' && r.vista === 'reserva'));
     });
-    window.scrollTo(0, 0);
+    vista.scrollTop = 0; window.scrollTo(0, 0);
     switch (r.vista) {
       case 'reservas': return pintarReservas();
       case 'reserva': return pintarDetalle(r.id);
@@ -227,6 +228,7 @@
 
   // ---------------- Login ----------------
   function pintarLogin(msg) {
+    document.body.setAttribute('data-vista', 'login');
     $('#menu').hidden = true; $('#btnRecargar').hidden = true;
     $('#tituloVista').textContent = 'Acceso';
     var gestores = C.GESTORES || [];
@@ -379,7 +381,9 @@
     vista.innerHTML = seg + cuerpo;
     $('#lFiltro').onclick = function (e) { var b = e.target.closest('button'); if (b) { S.filtro = b.dataset.f; pintarReservas(); } };
     if ($('#lCanc')) $('#lCanc').onchange = function () { S.verCanceladas = this.checked; pintarReservas(); };
-    if ($('#rPas')) $('#rPas').onchange = function () { S.relPasadas = this.checked; pintarReservas(); };
+    if ($('#rModo')) $('#rModo').onclick = function (e) { var b = e.target.closest('button'); if (b) { S.relModo = b.dataset.m; pintarReservas(); } };
+    if ($('#rDesde')) $('#rDesde').onchange = function () { S.relDesde = this.value; pintarReservas(); };
+    if ($('#rHasta')) $('#rHasta').onchange = function () { S.relHasta = this.value; pintarReservas(); };
     if ($('#fTodos')) $('#fTodos').onchange = function () { S.findesTodos = this.checked; pintarReservas(); };
     if ($('#rPdf')) $('#rPdf').onclick = function () { document.body.classList.add('imprimiendo'); window.print(); setTimeout(function () { document.body.classList.remove('imprimiendo'); }, 500); };
     if ($('#rWord')) $('#rWord').onclick = exportarWord;
@@ -401,8 +405,9 @@
 
   /** Relación cronológica con el formato habitual de la casa, mejorado. */
   function datosRelacion() {
-    var desde = S.relPasadas ? '' : aTexto(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
-    var lista = ordenar(reservas().filter(function (r) { return r.salida >= desde; }));
+    var rango = S.relModo === 'rango';
+    var desde = rango && S.relDesde ? S.relDesde : '', hasta = rango && S.relHasta ? S.relHasta : '9999-12-31';
+    var lista = ordenar(reservas().filter(function (r) { return r.salida >= desde && r.entrada <= hasta; }));
     var grupos = [], actual = null;
     lista.forEach(function (r) {
       var k = r.entrada.slice(0, 7);
@@ -436,18 +441,27 @@
           (l.obs ? '<br><span class="rel-obs">' + l.obs + '</span>' : '') + '</button>';
       }).join('');
     }).join('');
-    return '<div class="rel-barra"><label class="sub check"><input type="checkbox" id="rPas"' + (S.relPasadas ? ' checked' : '') + '> Incluir meses pasados</label>' +
-      '<div class="fila-btns"><button class="btn sec" id="rPdf">PDF / Imprimir</button><button class="btn sec" id="rWord">Word</button></div></div>' +
-      '<div class="tarjeta" id="relacion"><div class="rel-cab">Relación de reservas · ' + esc(C.NOMBRE_CASA || '') + '</div>' +
+    var rango = S.relModo === 'rango';
+    return '<div class="tarjeta rel-filtro"><div class="segmento" id="rModo">' +
+      '<button data-m="todas" class="' + (!rango ? 'activo' : '') + '">Todas las reservas</button>' +
+      '<button data-m="rango" class="' + (rango ? 'activo' : '') + '">Entre fechas</button></div>' +
+      (rango ? '<div class="dos" style="margin-top:10px"><label class="campo"><span>Desde</span><input class="entrada" id="rDesde" type="date" value="' + esc(S.relDesde) + '"></label>' +
+        '<label class="campo"><span>Hasta</span><input class="entrada" id="rHasta" type="date" value="' + esc(S.relHasta) + '"></label></div>' : '') +
+      '<div class="fila-btns" style="margin-top:6px"><button class="btn sec" id="rPdf">PDF / Imprimir</button><button class="btn sec" id="rWord">Word</button></div></div>' +
+      '<div class="tarjeta" id="relacion"><div class="rel-cab">Relación de reservas · ' + esc(C.NOMBRE_CASA || '') + '<small>' + esc(textoRango()) + '</small></div>' +
       (cuerpo || '<div class="vacio">No hay reservas.</div>') + '</div>';
+  }
+  function textoRango() {
+    if (S.relModo !== 'rango' || (!S.relDesde && !S.relHasta)) return 'Todas las reservas';
+    return (S.relDesde ? 'Desde ' + legible(S.relDesde) : 'Hasta') + (S.relDesde && S.relHasta ? ' hasta ' : ' ') + (S.relHasta ? legible(S.relHasta) : '');
   }
   function exportarWord() {
     var grupos = datosRelacion();
     var html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8">' +
       '<style>body{font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#222}h1{font-family:Georgia,serif;color:#85200C;font-size:16pt;margin:0 0 4pt}' +
-      'h2{font-size:12pt;color:#89588B;margin:14pt 0 4pt;border-bottom:1px solid #DAD6E4}p{margin:0 0 5pt}.d{color:#666;font-size:9.5pt}' +
+      'h2{font-size:12pt;color:#89588B;margin:18pt 0 6pt;border-bottom:1px solid #DAD6E4}p{margin:0 0 14pt;line-height:1.35}.d{color:#666;font-size:9.5pt}' +
       '.o{color:#666;font-size:9.5pt;font-style:italic}.c{text-decoration:line-through;color:#999}.e{font-size:8.5pt;font-weight:bold}</style></head><body>' +
-      '<h1>Relación de reservas · ' + esc(C.NOMBRE_CASA || '') + '</h1><p class="d">Generada el ' + legible(hoyTxt()) + '</p>' +
+      '<h1>Relación de reservas · ' + esc(C.NOMBRE_CASA || '') + '</h1><p class="d">' + esc(textoRango()) + ' · generada el ' + legible(hoyTxt()) + '</p>' +
       grupos.map(function (g) {
         return '<h2>' + g.mes + ' ' + g.anio + '</h2>' + g.items.map(function (r) {
           var l = lineaRelacion(r);
