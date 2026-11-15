@@ -421,3 +421,12 @@ body[data-vista="login"] main { display: flex; flex-direction: column; justify-c
 .form-espacio { display: none; }
 body[data-vista="nueva"] main, body[data-vista="editar"] main { padding-bottom: 0; }
 @media (min-width: 752px) { .pie-form { margin: 0; } }
+
+/* v1.4.0: accesos bajo el calendario y, en el móvil, días sin estirar */
+.cal-accesos { flex: 0 0 auto; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+.cal-accesos .btn { min-height: 44px; padding: 10px 12px; }
+@media (max-width: 699px) {
+  body[data-vista="calendario"] .cal-solo { flex: 0 0 auto; }
+  body[data-vista="calendario"] #rejilla { flex: 0 0 auto; }
+  body[data-vista="calendario"] .cal-solo .semana { flex: 0 0 auto; min-height: 50px; }
+}

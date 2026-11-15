@@ -3,7 +3,7 @@
   'use strict';
   var C = window.CONFIG || {};
   var DEMO = !C.API_URL;
-  var VERSION = '1.3.3';
+  var VERSION = '1.4.0';
   var S = { clave: null, gestor: null, datos: null, mes: null, sinConexion: false, filtro: 'proximas', verCanceladas: false,
             relModo: 'todas', relDesde: '', relHasta: '', findesTodos: false };
   var $ = function (s, el) { return (el || document).querySelector(s); };
@@ -251,10 +251,10 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
     vista.innerHTML =
       '<div class="login"><img class="logo" src="icons/icon-192.png" alt="">' +
       '<h1>' + esc(C.NOMBRE_CASA || 'Casa') + '</h1><p class="sub">' + esc(C.SUBTITULO || '') + ' · Gestión de ocupación</p>' +
-      '<div class="tarjeta"><label class="campo"><span>Clave de acceso</span><input class="entrada" id="lClave" type="password" autocomplete="current-password" placeholder="' + (DEMO ? 'En demostración: demo' : 'Clave compartida') + '"></label>' +
-      '<label class="campo"><span>¿Quién eres?</span></label><div class="chips" id="lGestores">' +
+      '<div class="tarjeta"><label class="campo"><span>¿Quién eres?</span></label><div class="chips" id="lGestores">' +
       gestores.map(function (g) { return '<button type="button" class="chip' + (g === elegido ? ' activo' : '') + '">' + esc(g) + '</button>'; }).join('') +
-      '</div><p class="error-txt" id="lError">' + esc(msg || '') + '</p>' +
+      '</div><label class="campo" style="margin-top:12px"><span>Tu clave</span><input class="entrada" id="lClave" type="password" inputmode="numeric" autocomplete="current-password" placeholder="' + (DEMO ? 'En demostración: demo' : 'Clave personal') + '"></label>' +
+      '<p class="error-txt" id="lError">' + esc(msg || '') + '</p>' +
       '<button class="btn ancho" id="lEntrar" style="margin-top:14px">Entrar</button></div></div>';
     $('#lGestores').onclick = function (e) {
       var b = e.target.closest('.chip'); if (!b) return;
@@ -264,8 +264,8 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
     if (DEMO) $('#lClave').value = 'demo';
     function entrar() {
       var clave = $('#lClave').value.trim();
-      if (!clave) return ($('#lError').textContent = 'Escribe la clave.');
       if (!elegido) return ($('#lError').textContent = 'Indica quién eres.');
+      if (!clave) return ($('#lError').textContent = 'Escribe tu clave.');
       S.clave = clave; S.gestor = elegido;
       cargando(true);
       api('inicial').then(function () {
@@ -273,7 +273,7 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
         if (!location.hash || location.hash === '#/') location.hash = '/calendario'; else pintar();
       }).catch(function (e) {
         S.clave = null;
-        $('#lError').textContent = e.codigo === 'CLAVE' ? 'Clave incorrecta.' : (e.message || 'No se pudo conectar. Revisa la dirección API_URL de config.js.');
+        $('#lError').textContent = e.codigo === 'CLAVE' ? 'Clave incorrecta para ' + elegido + '.' : (e.message || 'No se pudo conectar. Revisa la dirección API_URL de config.js.');
       }).then(function () { cargando(false); });
     }
     $('#lEntrar').onclick = entrar;
@@ -337,7 +337,9 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
       '<h2>' + esc(nombreMes(m)) + (esHoy ? '' : ' <button class="hoy-btn" id="cHoy">Hoy</button>') + '</h2>' +
       '<button class="icono" id="cSig" aria-label="Mes siguiente">›</button></div>' +
       '<div class="dias-sem"><div>L</div><div>M</div><div>X</div><div>J</div><div>V</div><div>S</div><div>D</div></div>' +
-      '<div id="rejilla">' + semanas + '</div></div>';
+      '<div id="rejilla">' + semanas + '</div></div>' +
+      '<div class="cal-accesos"><button class="btn sec" data-acc="proximas">Próximas</button><button class="btn sec" data-acc="findes">Fines de semana</button></div>';
+    $$('.cal-accesos [data-acc]').forEach(function (b) { b.onclick = function () { S.filtro = b.dataset.acc; ir('reservas'); }; });
     $('#cAnt').onclick = function () { S.mes = new Date(m.getFullYear(), m.getMonth() - 1, 1); pintarCalendario(); };
     $('#cSig').onclick = function () { S.mes = new Date(m.getFullYear(), m.getMonth() + 1, 1); pintarCalendario(); };
     if ($('#cHoy')) $('#cHoy').onclick = function () { S.mes = null; pintarCalendario(); };
@@ -389,7 +391,7 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
   // ---------------- Reservas: listas, relación y fines de semana ----------------
   function pintarReservas() {
     var seg = '<div class="segmento cuatro" id="lFiltro">' +
-      [['proximas', 'Próximas'], ['pasadas', 'Pasadas'], ['relacion', 'Relación'], ['findes', 'Fines de semana']].map(function (x) {
+      [['proximas', 'Próximas'], ['pasadas', 'Pasadas'], ['relacion', 'Lista reservas'], ['findes', 'Fines de semana']].map(function (x) {
         return '<button data-f="' + x[0] + '" class="' + (S.filtro === x[0] ? 'activo' : '') + '">' + x[1] + '</button>';
       }).join('') + '</div>';
     var cuerpo = S.filtro === 'relacion' ? htmlRelacion() : S.filtro === 'findes' ? htmlFindes() : htmlLista();
@@ -463,7 +465,7 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
       (rango ? '<div class="dos" style="margin-top:10px"><label class="campo"><span>Desde</span><input class="entrada" id="rDesde" type="date" value="' + esc(S.relDesde) + '"></label>' +
         '<label class="campo"><span>Hasta</span><input class="entrada" id="rHasta" type="date" value="' + esc(S.relHasta) + '"></label></div>' : '') +
       '<div class="fila-btns" style="margin-top:6px"><button class="btn sec" id="rPdf">PDF / Imprimir</button><button class="btn sec" id="rWord">Word</button></div></div>' +
-      '<div class="tarjeta" id="relacion"><div class="rel-cab">Relación de reservas · ' + esc(C.NOMBRE_CASA || '') + '<small>' + esc(textoRango()) + '</small></div>' +
+      '<div class="tarjeta" id="relacion"><div class="rel-cab">Lista de reservas · ' + esc(C.NOMBRE_CASA || '') + '<small>' + esc(textoRango()) + '</small></div>' +
       (cuerpo || '<div class="vacio">No hay reservas.</div>') + '</div>';
   }
   function textoRango() {
@@ -476,7 +478,7 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
       '<style>body{font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#222}h1{font-family:Georgia,serif;color:#85200C;font-size:16pt;margin:0 0 4pt}' +
       'h2{font-size:12pt;color:#89588B;margin:18pt 0 6pt;border-bottom:1px solid #DAD6E4}p{margin:0 0 14pt;line-height:1.35}.d{color:#666;font-size:9.5pt}' +
       '.o{color:#666;font-size:9.5pt;font-style:italic}.c{text-decoration:line-through;color:#999}.e{font-size:8.5pt;font-weight:bold}</style></head><body>' +
-      '<h1>Relación de reservas · ' + esc(C.NOMBRE_CASA || '') + '</h1><p class="d">' + esc(textoRango()) + ' · generada el ' + legible(hoyTxt()) + '</p>' +
+      '<h1>Lista de reservas · ' + esc(C.NOMBRE_CASA || '') + '</h1><p class="d">' + esc(textoRango()) + ' · generada el ' + legible(hoyTxt()) + '</p>' +
       grupos.map(function (g) {
         return '<h2>' + g.mes + ' ' + g.anio + '</h2>' + g.items.map(function (r) {
           var l = lineaRelacion(r);
@@ -488,7 +490,7 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
       }).join('') + '</body></html>';
     var blob = new Blob(['﻿', html], { type: 'application/msword' });
     var a = document.createElement('a');
-    a.href = URL.createObjectURL(blob); a.download = 'Relacion_reservas_' + hoyTxt() + '.doc';
+    a.href = URL.createObjectURL(blob); a.download = 'Lista_reservas_' + hoyTxt() + '.doc';
     document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
     toast('Documento de Word descargado');
   }
@@ -582,8 +584,8 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
         });
       };
     }
-    if ($('#dCancelar')) $('#dCancelar').onclick = accion('cancelarReserva', '¿Cancelar la reserva de <b>' + esc(r.grupo) + '</b>? Se quitará del calendario y quedará marcada como cancelada en la relación.', 'Sí, cancelar', 'Reserva cancelada');
-    $('#dBorrar').onclick = accion('borrarReserva', '¿<b>Borrar</b> definitivamente «' + esc(r.grupo) + '»? Desaparecerá de la app, de la relación y del calendario. <b>No se puede deshacer.</b>' +
+    if ($('#dCancelar')) $('#dCancelar').onclick = accion('cancelarReserva', '¿Cancelar la reserva de <b>' + esc(r.grupo) + '</b>? Se quitará del calendario y quedará marcada como cancelada en la lista de reservas.', 'Sí, cancelar', 'Reserva cancelada');
+    $('#dBorrar').onclick = accion('borrarReserva', '¿<b>Borrar</b> definitivamente «' + esc(r.grupo) + '»? Desaparecerá de la app, de la lista de reservas y del calendario. <b>No se puede deshacer.</b>' +
       (r.estado !== 'Cancelada' ? '<br><br>Si solo se ha anulado, mejor usa «Cancelar reserva» para que quede constancia.' : ''), 'Sí, borrar', 'Reserva borrada');
   }
 
@@ -836,12 +838,10 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
 
   // ---------------- Ajustes ----------------
   function pintarAjustes() {
-    var gestores = C.GESTORES || [];
     var c = lsGet('cache'), aj = S.datos.ajustes || {};
     vista.innerHTML =
-      '<div class="tarjeta"><h2>¿Quién eres?</h2><div class="chips" id="aGest">' +
-      gestores.map(function (g) { return '<button class="chip' + (g === S.gestor ? ' activo' : '') + '">' + esc(g) + '</button>'; }).join('') +
-      '</div><p class="sub" style="margin:10px 0 0">Queda anotado en cada reserva que crees o modifiques.</p></div>' +
+      '<div class="tarjeta"><h2>Sesión</h2><div class="dato"><span>Has entrado como</span><span><b>' + esc(S.gestor || '') + '</b></span></div>' +
+      '<p class="sub" style="margin:10px 0 0">Queda anotado en cada reserva que crees o modifiques. Para entrar como otra persona, cierra la sesión y entra con su clave.</p></div>' +
       '<div class="tarjeta"><h2>Casa</h2>' +
       '<div class="dato"><span>Habitaciones disponibles</span><span>' + habitaciones().filter(function (h) { return h.estado === 'Disponible'; }).length + ' de ' + habitaciones().length + '</span></div>' +
       '<div class="dato"><span>Plazas disponibles</span><span>' + capacidadDisponible() + '</span></div>' +
@@ -855,7 +855,6 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
       '</details>' +
       '<button class="btn peligro ancho" id="aSalir">Cerrar sesión en este móvil</button>' +
       '<p class="sub" style="text-align:center;font-size:12px;margin-top:18px">App ' + VERSION + ' · Puente ' + esc(aj.version || '1.0.0') + (DEMO ? ' · demostración' : '') + '</p>';
-    $('#aGest').onclick = function (e) { var b = e.target.closest('.chip'); if (!b) return; S.gestor = b.textContent; lsSet('gestor', S.gestor); pintarAjustes(); toast('Ahora eres ' + S.gestor); };
     function accion(nombre, texto, fmt) {
       return function () {
         if (S.sinConexion) return toast('Sin conexión.', true);
