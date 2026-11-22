@@ -3,7 +3,7 @@
   'use strict';
   var C = window.CONFIG || {};
   var DEMO = !C.API_URL;
-  var VERSION = '2.0.2';
+  var VERSION = '2.1.0';
   var VERSION_FECHA = '22/11/2026';
   var S = { clave: null, gestor: null, datos: null, mes: null, sinConexion: false, filtro: 'proximas', verCanceladas: false,
             relModo: 'todas', relDesde: '', relHasta: '', findesTodos: false };
@@ -180,7 +180,7 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
   }
 
   // ---------------- Navegación ----------------
-  var TITULOS = { calendario: 'Calendario', reservas: 'Reservas', nueva: 'Nueva reserva', editar: 'Editar reserva', reserva: 'Reserva', ajustes: 'Ajustes', admin: 'Administración', servicios: 'Servicios y datos', hoja: 'Hoja de estancia', formulario: 'Formulario del grupo', reparto: 'Reparto de habitaciones', habitaciones: 'Hoja de habitaciones', contrato: 'Contrato' };
+  var TITULOS = { calendario: 'Calendario', reservas: 'Reservas', nueva: 'Nueva reserva', editar: 'Editar reserva', reserva: 'Reserva', ajustes: 'Ajustes', admin: 'Administración', servicios: 'Servicios y datos', hoja: 'Hoja de estancia', formulario: 'Formulario del grupo', reparto: 'Reparto de habitaciones', habitaciones: 'Hoja de habitaciones', contrato: 'Condiciones' };
   function ruta() {
     var h = location.hash.replace(/^#\/?/, '');
     var q = {}, partes = h.split('?');
@@ -588,9 +588,10 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
   function fechaCorta(m) { var t = String(m || ''); return t ? legible(t.slice(0, 10)).slice(0, 5) : ''; }
   /** Estado de un documento según su última marca: { enviado, b } */
   function marcaDoc(r, si, no) { var b = ultimaNota(r, [si, no]); return { enviado: !!(b && b.accion.indexOf(si) === 0), b: b }; }
-  function fianzaPagada(r) {
-    var b = ultimaNota(r, ['Fianza pagada', 'Fianza pendiente']);
-    if (b) return { pagada: b.accion === 'Fianza pagada', b: b };
+  // 2.1.0: «fianza» pasa a llamarse «señal» (se leen también las anotaciones antiguas)
+  function senalPagada(r) {
+    var b = ultimaNota(r, ['Señal pagada', 'Señal pendiente', 'Fianza pagada', 'Fianza pendiente']);
+    if (b) return { pagada: b.accion === 'Señal pagada' || b.accion === 'Fianza pagada', b: b };
     var s = parseFloat(String((r.grupoDatos || {}).senal || '').replace(',', '.'));
     return { pagada: s > 0, b: null };
   }
@@ -625,27 +626,22 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
       else P.push({ t: 'Habitaciones', e: reenv ? 'aviso' : 'ok', txt: n + ' hab. · ' + pernoctan(r) + ' pers.' + (reenv ? ' · el grupo cambió su formulario' : ''),
         cq: cuandoQuien(rep), acc: { txt: reenv ? 'Revisar' : 'Ver', fn: function () { ir('reparto/' + idq); } }, sig: reenv ? 'Revisar el reparto de habitaciones' : '' });
     }
-    // 4. Presupuesto
-    var pre = marcaDoc(r, 'Presupuesto enviado', 'Presupuesto: marcado');
-    P.push(pre.enviado ? { t: 'Presupuesto', e: 'ok', txt: 'Enviado', cq: cuandoQuien(pre.b), acc: { txt: 'Ver', fn: function () { ir('hoja/' + idq + '?modo=presupuesto'); } }, marca: { txt: 'Deshacer', tipo: 'presupuesto_no' } }
-      : { t: 'Presupuesto', e: 'pend', txt: 'Sin enviar', cq: '', acc: { txt: 'Ver', fn: function () { ir('hoja/' + idq + '?modo=presupuesto'); } },
-          marca: { txt: 'Marcar enviado', tipo: 'presupuesto_enviado' }, sig: 'Enviar el presupuesto' });
-    // 5. Contrato y fianza
-    // 2.0.0: el contrato se firma desde el móvil (o se marca «firmado en papel»)
-    var fi = r.firma, papel = marcaDoc(r, 'Contrato firmado en papel', 'Contrato: marcado sin firmar'), fz = fianzaPagada(r);
+    // 4. Presupuesto y condiciones (2.1.0: un solo paso; el grupo los acepta con un enlace y paga la señal)
+    var fi = r.firma, papel = marcaDoc(r, 'Contrato firmado en papel', 'Contrato: marcado sin firmar'), fz = senalPagada(r);
     var cEnv = ultimaNota(r, ['Contrato enviado', 'Contrato: enlace creado']);
     var firmado = (fi && fi.estado === 'Firmado') || papel.enviado, esperaFirma = !firmado && fi && fi.estado === 'Pendiente';
-    var cTxt = fi && fi.estado === 'Firmado' ? 'firmado por ' + fi.nombre : papel.enviado ? 'firmado en papel' : esperaFirma ? 'enviado, esperando firma' : 'sin enviar';
+    var cTxt = fi && fi.estado === 'Firmado' ? 'Aceptado por ' + fi.nombre : papel.enviado ? 'Firmado en papel' : esperaFirma ? 'Enviado, esperando al grupo' : 'Sin enviar';
     var cCq = fi && fi.estado === 'Firmado' ? fechaCorta(fi.firmadoEl) + ' · ' + fi.nombre : papel.enviado ? cuandoQuien(papel.b) : esperaFirma ? cuandoQuien(cEnv) : '';
-    var fzMarca = fz.pagada ? { txt: 'Deshacer: fianza', tipo: 'fianza_pendiente' } : { txt: 'Marcar fianza pagada', tipo: 'fianza_pagada' };
-    P.push({ t: 'Contrato y fianza', e: firmado && fz.pagada ? 'ok' : firmado || fz.pagada || esperaFirma ? 'ahora' : 'pend',
-      txt: 'Contrato ' + cTxt + ' · Fianza ' + (fz.pagada ? 'pagada' : 'pendiente'),
-      cq: [cCq, fz.b ? 'fianza ' + cuandoQuien(fz.b) : ''].filter(Boolean).join(' · '),
-      acc: firmado ? { txt: 'Ver contrato', fn: function () { ir('contrato/' + idq); } }
-        : { txt: esperaFirma ? 'Reenviar' : 'Enviar para firmar', fn: function () { enviarContrato(r); } },
-      marcas: (firmado ? [] : [{ txt: 'Firmado en papel', tipo: 'contrato_papel' }]).concat(papel.enviado ? [{ txt: 'Deshacer: papel', tipo: 'contrato_papel_no' }] : []).concat([fzMarca]),
+    var fzMarca = fz.pagada ? { txt: 'Deshacer: señal', tipo: 'fianza_pendiente' } : { txt: 'Marcar señal pagada', tipo: 'fianza_pagada' };
+    var verPre = { txt: 'Ver presupuesto', fn: function () { ir('hoja/' + idq + '?modo=presupuesto'); } };
+    P.push({ t: 'Presupuesto y condiciones', e: firmado && fz.pagada ? 'ok' : firmado || fz.pagada || esperaFirma ? 'ahora' : 'pend',
+      txt: cTxt + ' · Señal ' + (fz.pagada ? 'pagada' : 'pendiente'),
+      cq: [cCq, fz.b ? 'señal ' + cuandoQuien(fz.b) : ''].filter(Boolean).join(' · '),
+      acc: firmado ? { txt: 'Ver condiciones', fn: function () { ir('contrato/' + idq); } }
+        : { txt: esperaFirma ? 'Reenviar' : 'Enviar para aceptar', fn: function () { enviarContrato(r); } },
+      marcas: [verPre].concat(firmado ? [] : [{ txt: 'Firmado en papel', tipo: 'contrato_papel' }]).concat(papel.enviado ? [{ txt: 'Deshacer: papel', tipo: 'contrato_papel_no' }] : []).concat([fzMarca]),
       espera: esperaFirma && fz.pagada,
-      sig: !firmado && !esperaFirma ? 'Enviar el contrato para firmar' : !fz.pagada ? 'Comprobar la fianza' : '',
+      sig: !firmado && !esperaFirma ? 'Enviar el presupuesto y las condiciones' : !fz.pagada ? 'Comprobar la señal' : '',
       sigMarca: !firmado && !esperaFirma ? '' : 'fianza_pagada' });
     // 6. Estancia
     var dias = Math.round((aFecha(r.entrada) - aFecha(hoy)) / 864e5);
@@ -671,7 +667,7 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
     if (S.sinConexion) return toast('Sin conexión.', true);
     var h = calcularHoja(r);
     var seguir = h.total > 0 ? Promise.resolve(true)
-      : confirmar('La hoja de estancia de esta reserva no tiene importe (no hay servicios). El contrato saldría sin precio. ¿Enviarlo igualmente?', 'Enviar igualmente');
+      : confirmar('La hoja de estancia de esta reserva no tiene importe (no hay servicios). Las condiciones saldrían sin precio. ¿Enviarlas igualmente?', 'Enviar igualmente');
     seguir.then(function (ok) {
       if (!ok) return;
       cargando(true);
@@ -690,9 +686,10 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
     }).join('');
     var firmaSvg = d.firma ? '<svg class="ct-firma" viewBox="0 0 600 200" preserveAspectRatio="xMidYMid meet"><path d="' + esc(d.firma) + '" fill="none" stroke="#123" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>' : '<div class="ct-firma vacia"></div>';
     return '<div class="hoja-doc contrato-doc">' + cuerpo +
-      '<h3 class="ct-h">INFORMACIÓN SOBRE PROTECCIÓN DE DATOS</h3>' + String(c.datos || '').split(/\n+/).map(function (p) { return '<p>' + esc(p) + '</p>'; }).join('') +
-      '<p><b>' + (d.firmado ? (d.imagenes ? '☑' : '☐') : '☐') + '</b> ' + esc(c.imagenes || '') + '</p>' +
-      '<p><b>Declaración:</b> ' + esc(c.autorizacion || '') + '</p>' +
+      '<h3 class="ct-h">INFORMACIÓN ' + (c.basico ? 'COMPLETA ' : '') + 'SOBRE PROTECCIÓN DE DATOS</h3>' + String(c.datos || '').split(/\n+/).map(function (p) { return '<p>' + esc(p) + '</p>'; }).join('') +
+      (c.imagenes ? '<p><b>' + (d.firmado && d.imagenes ? '☑' : '☐') + '</b> ' + esc(c.imagenes) + '</p>' : '') +
+      (c.comunicaciones ? '<p><b>' + (d.firmado && (d.comunicaciones || doc.comunicaciones) ? '☑' : '☐') + '</b> ' + esc(c.comunicaciones) + '</p>' : '') +
+      (c.autorizacion ? '<p><b>Declaración:</b> ' + esc(c.autorizacion) + '</p>' : '') +
       '<div class="ct-firmas"><div><small>Por el prestador del servicio</small><div class="ct-firma vacia"></div><b>' + esc(casa.firmante || '') + '</b><br>' + esc(casa.cargo || '') + '</div>' +
       '<div><small>Por el cliente</small>' + firmaSvg + '<b>' + esc(d.nombre || '') + '</b>' + (d.dni ? '<br>DNI ' + esc(d.dni) : '') + (d.cargo ? ' · ' + esc(d.cargo) : '') +
       (d.firmado ? '<br><small>Firmado electrónicamente el ' + esc(marcaLegible(d.firmadoEl)) + '</small>' : '') + '</div></div></div>';
@@ -704,15 +701,15 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
     cargando(true);
     usarDB(function () { return DB.verContrato(r.id, r.firma && r.firma.importe ? undefined : calcularHoja(r).total); }).then(function (d) {
       cargando(false);
-      vista.innerHTML = '<div class="hoja-barra"><div class="fila-btns">' + (!d.firmado ? '<button class="btn sec" id="ctEnviar">Enviar para firmar</button>' : '') +
+      vista.innerHTML = '<div class="hoja-barra"><div class="fila-btns">' + (!d.firmado ? '<button class="btn sec" id="ctEnviar">Enviar para aceptar</button>' : '') +
         '<button class="btn" id="ctPdf">Imprimir / PDF</button></div>' +
-        (d.firmado ? '<p class="sub" style="margin:8px 0 0">Firmado por <b>' + esc(d.nombre) + '</b> el ' + esc(marcaLegible(d.firmadoEl)) + '.</p>'
-          : '<p class="sub" style="margin:8px 0 0">Vista previa: aún no está firmado.' + (d.incompleto ? ' <b>Falta completar el texto del contrato en Administración › Contrato.</b>' : '') + '</p>') + '</div>' +
+        (d.firmado ? '<p class="sub" style="margin:8px 0 0">Aceptado y firmado por <b>' + esc(d.nombre) + '</b> el ' + esc(marcaLegible(d.firmadoEl)) + '.</p>'
+          : '<p class="sub" style="margin:8px 0 0">Vista previa: el grupo aún no lo ha aceptado.' + (d.incompleto ? ' <b>Falta completar el texto de las condiciones en Administración › Contrato.</b>' : '') + '</p>') + '</div>' +
         '<div class="hoja-marco">' + htmlContrato(d) + '</div>';
       enlazarVolver();
       if ($('#ctEnviar')) $('#ctEnviar').onclick = function () { enviarContrato(r); };
       $('#ctPdf').onclick = function () {
-        var t = document.title; document.title = 'Contrato · ' + r.grupo;
+        var t = document.title; document.title = 'Condiciones · ' + r.grupo;
         document.body.classList.add('imprimiendo-hoja'); window.print();
         setTimeout(function () { document.body.classList.remove('imprimiendo-hoja'); document.title = t; }, 800);
       };
@@ -815,6 +812,7 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
         var p = pasos[+b.dataset.p], k = b.dataset.k;
         if (k === 'acc') return p.acc.fn();
         var m = k === 'marca' ? p.marca : p.marcas[+k.slice(1)];
+        if (m.fn) return m.fn();
         anotar(r, m.tipo, '', 'Anotado en la bitácora');
       };
     });
@@ -1500,21 +1498,21 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
       if (apuntado[t] || S.sinConexion) return; apuntado[t] = 1; usarDB(function () { return DB.anotar(r.id, t); }).catch(function () {});
     }
     var texto = contrato
-      ? 'Hola. Os enviamos el contrato de vuestra estancia en la Casa de Espiritualidad María Madre (' + legible(r.entrada) + ' a ' + legible(r.salida) + '). Podéis leerlo y firmarlo desde el móvil en este enlace:'
+      ? 'Hola. Os enviamos el presupuesto y las condiciones de vuestra estancia en la Casa de Espiritualidad María Madre (' + legible(r.entrada) + ' a ' + legible(r.salida) + '). Podéis revisarlos y aceptarlos desde el móvil en este enlace:'
       : 'Hola. Para preparar vuestra estancia en la Casa de Espiritualidad María Madre (' + legible(r.entrada) + ' a ' + legible(r.salida) +
       '), por favor rellenad este formulario. Podéis corregirlo con el mismo enlace hasta el día de entrada:';
-    modal('<p style="margin-bottom:6px"><b>' + (contrato ? 'Enlace para firmar el contrato' : 'Enlace del formulario') + '</b></p><p class="sub" style="margin:0 0 10px">Envíalo al responsable del grupo. Solo sirve para esta reserva.</p>' +
+    modal('<p style="margin-bottom:6px"><b>' + (contrato ? 'Enlace del presupuesto y las condiciones' : 'Enlace del formulario') + '</b></p><p class="sub" style="margin:0 0 10px">Envíalo al responsable del grupo. Solo sirve para esta reserva.</p>' +
       '<input class="entrada" id="feEnlace" readonly value="' + esc(enlace) + '" style="font-size:14px">' +
       '<div class="fila-btns" style="margin-top:10px">' + (navigator.share ? '<button class="btn" data-r="share">Compartir…</button>' : '') +
       '<button class="btn sec" data-r="copiar">Copiar</button></div>' +
       '<div class="fila-btns" style="margin-top:8px"><a class="btn sec" data-log="enlace_whatsapp" target="_blank" rel="noopener" href="https://wa.me/?text=' + encodeURIComponent(texto + ' ' + enlace) + '">WhatsApp</a>' +
-      '<a class="btn sec" data-log="enlace_correo" href="mailto:' + esc(r.email || '') + '?subject=' + encodeURIComponent((contrato ? 'Contrato' : 'Formulario') + ' de su estancia · Casa María Madre') + '&body=' + encodeURIComponent(texto + '\n\n' + enlace) + '">Correo</a></div>' +
+      '<a class="btn sec" data-log="enlace_correo" href="mailto:' + esc(r.email || '') + '?subject=' + encodeURIComponent((contrato ? 'Presupuesto y condiciones' : 'Formulario') + ' de su estancia · Casa María Madre') + '&body=' + encodeURIComponent(texto + '\n\n' + enlace) + '">Correo</a></div>' +
       '<div class="fila-btns" style="margin-top:8px"><button class="btn borde" data-r="0">Cerrar</button></div>',
       function (e, cerrar) {
         var lg = e.target.closest('[data-log]'); if (lg) apuntar(lg.dataset.log);
         var b = e.target.closest('[data-r]'); if (!b) return;
         if (b.dataset.r === '0') { cerrar(); pintar(); return; }
-        if (b.dataset.r === 'share') { navigator.share({ title: (contrato ? 'Contrato' : 'Formulario') + ' · Casa María Madre', text: texto, url: enlace }).then(function () { apuntar('enlace_compartido'); }).catch(function () {}); return; }
+        if (b.dataset.r === 'share') { navigator.share({ title: (contrato ? 'Presupuesto y condiciones' : 'Formulario') + ' · Casa María Madre', text: texto, url: enlace }).then(function () { apuntar('enlace_compartido'); }).catch(function () {}); return; }
         if (b.dataset.r === 'copiar') {
           var i = $('#feEnlace'); i.select(); i.setSelectionRange(0, 9999);
           apuntar('enlace_copiado');
@@ -1560,11 +1558,14 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
         return '<div class="dato"><span>Persona ' + esc(a.persona) + '</span><span>' + esc(a.alergenos.concat(a.otras ? [a.otras] : []).join(', ')) + '</span></div>';
       }).join('') : '<p class="sub">Ninguna.</p>') + '</div>' +
       '<div class="tarjeta"><h2>Protección de datos</h2>' +
-      '<div class="dato"><span>Tratamiento de datos</span><span>' + (d.consentimientos && d.consentimientos.datos ? 'Sí' : 'No') + '</span></div>' +
-      '<div class="dato"><span>Imágenes</span><span>' + (d.consentimientos && d.consentimientos.imagenes ? 'Sí' : 'No') + '</span></div>' +
-      '<div class="dato"><span>Actúa en nombre del grupo</span><span>' + (d.consentimientos && d.consentimientos.autorizacion ? 'Sí' : 'No') + '</span></div>' +
-      (d.consentimientos && d.consentimientos.textos ? '<details class="txt-acep"><summary>Ver los textos que aceptó</summary>' +
-        ['datos', 'imagenes', 'autorizacion'].map(function (k) { var t = d.consentimientos.textos[k]; return t ? '<p>' + esc(t).replace(/\n/g, '<br>') + '</p>' : ''; }).join('') + '</details>' : '') + '</div>' +
+      // 2.1.0: el formulario solo informa; las casillas (imágenes, comunicaciones) se marcan al aceptar las condiciones
+      (d.consentimientos && d.consentimientos.informado
+        ? '<div class="dato"><span>Información</span><span>Recibida</span></div><p class="sub" style="margin:6px 0 0;font-size:13px">Imágenes y comunicaciones: se eligen al aceptar las condiciones.</p>'
+        : '<div class="dato"><span>Tratamiento de datos</span><span>' + (d.consentimientos && d.consentimientos.datos ? 'Sí' : 'No') + '</span></div>' +
+          '<div class="dato"><span>Imágenes</span><span>' + (d.consentimientos && d.consentimientos.imagenes ? 'Sí' : 'No') + '</span></div>' +
+          '<div class="dato"><span>Actúa en nombre del grupo</span><span>' + (d.consentimientos && d.consentimientos.autorizacion ? 'Sí' : 'No') + '</span></div>') +
+      (d.consentimientos && d.consentimientos.textos ? '<details class="txt-acep"><summary>Ver los textos que se le mostraron</summary>' +
+        ['basico', 'datos', 'imagenes', 'autorizacion'].map(function (k) { var t = d.consentimientos.textos[k]; return t ? '<p>' + esc(t).replace(/\n/g, '<br>') + '</p>' : ''; }).join('') + '</details>' : '') + '</div>' +
       '<div class="form-espacio"></div><div class="pie-form"><div class="total">' + (f.estado === 'Aplicado' ? 'Ya aplicado' : 'Pendiente de aplicar') + '</div>' +
       '<button class="btn" id="frAplicar">' + (f.estado === 'Aplicado' ? 'Aplicar de nuevo' : 'Aplicar a la reserva') + '</button></div>';
     vista.innerHTML = vista.innerHTML.replace('%%RESUMEN%%', cambios.length ?
