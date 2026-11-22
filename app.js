@@ -3,7 +3,7 @@
   'use strict';
   var C = window.CONFIG || {};
   var DEMO = !C.API_URL;
-  var VERSION = '2.1.0';
+  var VERSION = '2.1.1';
   var VERSION_FECHA = '22/11/2026';
   var S = { clave: null, gestor: null, datos: null, mes: null, sinConexion: false, filtro: 'proximas', verCanceladas: false,
             relModo: 'todas', relDesde: '', relHasta: '', findesTodos: false };
@@ -194,8 +194,21 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
   function volver() { if (historial > 0 && history.length > 1) history.back(); else ir('calendario'); }
   // 1.9.0: «Volver» va abajo: en la barra de «Guardar» si la hay; si no, en una barra propia.
   function botonVolver() { return ''; }
+  // 2.1.1: la barra de acciones («Volver», «Guardar»…) se ancla encima del menú, fuera de la zona que se desplaza,
+  // para que no flote ni tape el contenido. Cada vista la sigue escribiendo dentro de #vista; aquí se mueve.
+  (function anclarPie() {
+    var app = $('#app'), menu = $('#menu');
+    if (!app || !menu || !window.MutationObserver) return;
+    new MutationObserver(function (ms) {
+      // Solo cuando la vista añade algo (al mover la barra fuera también se produce un aviso, que se ignora)
+      if (!ms.some(function (m) { return m.addedNodes.length; })) return;
+      var nuevo = vista.querySelector('.pie-form');
+      $$('#app > .pie-form').forEach(function (x) { if (x !== nuevo) x.remove(); });
+      if (nuevo) app.insertBefore(nuevo, menu);
+    }).observe(vista, { childList: true });
+  })();
   function enlazarVolver(antes) {
-    var pie = vista.querySelector('.pie-form');
+    var pie = vista.querySelector('.pie-form') || $('#app > .pie-form');  // 2.1.1: puede estar ya anclada
     var b = '<button type="button" class="btn borde js-volver">‹ Volver</button>';
     if (pie) pie.insertAdjacentHTML('afterbegin', b);
     else vista.insertAdjacentHTML('beforeend', '<div class="pie-form pie-volver">' + b + '</div>');
