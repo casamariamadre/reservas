@@ -96,3 +96,7 @@ body.fg-final .fg-grupo, body.fg-final .fg-cab { border-bottom: 0; }
   .contrato-doc .hueco { background: none; }
   html, body { background: #fff !important; }
 }
+
+/* 2.1.0 · Presupuesto y datos en resumen (página de aceptación) */
+.pre-fila { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; padding: 6px 0; border-bottom: 1px solid #eee; }
+.pre-fila b { text-align: right; }
