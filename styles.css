@@ -638,3 +638,9 @@ input:not([type="checkbox"]):not([type="radio"]), select, textarea { font-size: 
 main { padding-bottom: 16px; }
 @media (max-height: 500px) and (orientation: landscape) { #app > .pie-form { padding: 5px 12px; } }
 @media print { #app > .pie-form { display: none !important; } }
+
+/* v2.1.2: la Evolución va al final y solo informa; al tocar una línea se abre su apartado */
+.paso-ir { cursor: pointer; align-items: center; }
+.paso-ir:hover .paso-t b, .paso-ir:focus-visible .paso-t b { color: var(--pri); }
+.paso-flecha { color: var(--texto-2); font-size: 20px; line-height: 1; padding: 0 2px; }
+.exp-pasos { margin-top: 4px; }
