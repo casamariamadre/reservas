@@ -631,3 +631,10 @@ input:not([type="checkbox"]):not([type="radio"]), select, textarea { font-size: 
 .ct-firmas small { color: #555; }
 .ct-firma { display: block; width: 100%; height: 90px; border-bottom: 1px solid #333; margin: 4px 0 6px; }
 @media print { .contrato-doc { font-size: 11.5pt; } }
+/* v2.1.1: barra de acciones anclada encima del menú (fuera de la zona que se desplaza; no tapa el contenido) */
+#app > .pie-form { position: static; flex: 0 0 auto; margin: 0; border-radius: 0; box-shadow: none; z-index: auto;
+  border-top: 1px solid var(--linea); padding: 8px max(16px, calc((100% - 720px) / 2)); }
+#app > .pie-form + .menu { border-top: 1px solid var(--linea); }
+main { padding-bottom: 16px; }
+@media (max-height: 500px) and (orientation: landscape) { #app > .pie-form { padding: 5px 12px; } }
+@media print { #app > .pie-form { display: none !important; } }
