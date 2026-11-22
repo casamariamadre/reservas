@@ -111,7 +111,7 @@
       campo('cTel', 'Teléfono', c.telefono, 'tel') + campo('cEmail', 'Correo electrónico', c.email, 'email') + '</div>' +
       '<div class="card"><div class="card-tit pri">Para la factura y el contrato</div>' +
       campo('gEnt', 'Entidad (nombre legal)', g.entidad) + campo('gCif', 'CIF', g.cif) + campo('gDir', 'Dirección', g.direccion) +
-      campo('gRep', 'Representante que firma', g.representante) + campo('gDni', 'DNI del representante', g.dni) + campo('gCar', 'Cargo', g.cargo) + '</div>';
+      campo('gRep', 'Representante que firma', g.representante) + campo('gDni', 'DNI del representante (recomendado)', g.dni) + campo('gCar', 'Cargo', g.cargo) + '</div>';
   }
 
   function paso2() {
@@ -209,15 +209,12 @@
       (aloj() ? '<b>Habitaciones:</b> ' + (hab.join(', ') || '—') + '<br>' : '') +
       '<b>Alergias:</b> ' + (al.length ? al.map(function (a, i) { return letra(i) + ': ' + a.alergenos.concat(a.otras ? [a.otras] : []).join(', '); }).join(' · ') : 'ninguna') + '<br>' +
       '<b>Importe estimado:</b> ' + euros + ' <span class="hint">(alojamiento y comidas; sin salas' + (p.bebes ? '; los de 0 a ' + (aj('edad.gratis_hasta') || 4) + ' años, gratis' : '') + (c.falta ? '; algún precio a consultar' : '') + ')</span></div>' +
+      // 2.1.0: sin casillas; solo la información básica de protección de datos y un enlace a la completa
       '<div class="card"><div class="card-tit">Protección de datos</div>' +
-      '<div class="hint" style="margin-bottom:4px">Los datos se usan solo para gestionar su estancia en la Casa. Lea la información antes de marcar las casillas.</div>' +
-      leerMas('Leer la información sobre protección de datos', TX.datos) +
-      '<label class="chk"><input type="checkbox" id="k1"' + (cs.datos ? ' checked' : '') + '><span>He sido informado y autorizo el tratamiento de los datos. <b>(obligatorio)</b></span></label>' +
-      leerMas('Leer la autorización de imágenes', TX.imagenes) +
-      '<label class="chk"><input type="checkbox" id="k2"' + (cs.imagenes ? ' checked' : '') + '><span>Autorizo la captación y difusión de imágenes. (opcional)</span></label>' +
-      leerMas('Leer la declaración de quien envía el formulario', TX.autorizacion) +
-      '<label class="chk"><input type="checkbox" id="k3"' + (cs.autorizacion ? ' checked' : '') + '><span>Actúo en nombre del grupo, con la autorización de sus integrantes. <b>(obligatorio)</b></span></label></div>' +
-      '<div class="hint" style="text-align:center">Al enviar, la Casa recibe los datos y le enviará el presupuesto y el contrato para firmar.</div>';
+      '<div class="hint" style="margin-bottom:4px">' + esc(TX.basico || 'Los datos se usan solo para gestionar su estancia en la Casa.') + '</div>' +
+      leerMas('Leer la información completa', TX.datos) +
+      (TX.autorizacion ? '<div class="hint" style="margin-top:6px">' + esc(TX.autorizacion) + '</div>' : '') + '</div>' +
+      '<div class="hint" style="text-align:center">Al enviar, la Casa recibe los datos y le enviará el presupuesto y las condiciones para aceptarlos.</div>';
   }
 
   // ---------------- Leer lo escrito ----------------
@@ -233,7 +230,6 @@
       $$('[data-otras]').forEach(function (e) { F.alergias[+e.dataset.otras].otras = e.value.trim(); });
     }
     if (paso === 3 && $('#hObs')) F.habitaciones.observaciones = $('#hObs').value.trim();
-    if (paso === 4) F.consentimientos = { datos: $('#k1').checked, imagenes: $('#k2').checked, autorizacion: $('#k3').checked };
   }
 
   function enlazar() {
@@ -278,8 +274,7 @@
 
   // ---------------- Enviar ----------------
   function enviar() {
-    var cs = F.consentimientos;
-    if (!cs.datos || !cs.autorizacion) return toast('Para enviar hay que marcar las dos casillas obligatorias.', true);
+    var cs = { informado: true };
     var pos = serviciosPosibles(), servicios = [], salas = [];
     Object.keys(F.servMap).forEach(function (k) { if (!pos[k]) return; var x = k.split('|'); if (F.servMap[k]) servicios.push({ fecha: x[0], servicio: x[1], total: F.servMap[k] }); });
     Object.keys(F.salaSet).forEach(function (k) { if (F.salaSet[k]) { var x = k.split('|'); salas.push({ fecha: x[0], sala: x[1] }); } });
@@ -291,7 +286,7 @@
       document.body.classList.add('fg-final');
       $('#fgToast').hidden = true;
       vista.innerHTML = '<div class="fin"><div class="ic" aria-hidden="true">✓</div><h2>¡Gracias! Formulario enviado</h2>' +
-        '<p class="hint">La Casa ha recibido sus datos. Le enviaremos el presupuesto y el contrato para firmar.</p>' +
+        '<p class="hint">La Casa ha recibido sus datos. Le enviaremos el presupuesto y las condiciones para aceptarlos.</p>' +
         '<p class="hint">Si necesita corregir algo, puede volver a abrir este mismo enlace hasta el día de entrada.</p>' +
         '<button type="button" class="b-pri b-fin" id="bTerminar">Terminar</button></div>';
       $('#bTerminar').onclick = function () {
