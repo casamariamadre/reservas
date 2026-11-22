@@ -3,7 +3,7 @@
   'use strict';
   var C = window.CONFIG || {};
   var DEMO = !C.API_URL;
-  var VERSION = '2.1.1';
+  var VERSION = '2.1.2';
   var VERSION_FECHA = '22/11/2026';
   var S = { clave: null, gestor: null, datos: null, mes: null, sinConexion: false, filtro: 'proximas', verCanceladas: false,
             relModo: 'todas', relDesde: '', relHasta: '', findesTodos: false };
@@ -615,28 +615,28 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
     // 1. Reserva
     var conf = ultimaNota(r, ['Reserva confirmada']), crea = ultimaNota(r, ['Crear']);
     P.push(r.estado === 'Confirmada'
-      ? { t: 'Reserva', e: 'ok', txt: 'Confirmada', cq: cuandoQuien(conf) }
-      : { t: 'Reserva', e: 'ahora', txt: 'Provisional', cq: cuandoQuien(crea) || (r.creadoPor ? fechaCorta(r.creadoEl) + ' · ' + r.creadoPor : ''),
+      ? { t: 'Reserva', ap: 'datos', e: 'ok', txt: 'Confirmada', cq: cuandoQuien(conf) }
+      : { t: 'Reserva', ap: 'datos', e: 'ahora', txt: 'Provisional', cq: cuandoQuien(crea) || (r.creadoPor ? fechaCorta(r.creadoEl) + ' · ' + r.creadoPor : ''),
           acc: { txt: 'Confirmar', fn: function () { ir('editar/' + idq + '?confirmar=1'); } }, sig: 'Confirmar la reserva' });
     // 2. Formulario del grupo
     var f = r.formulario, fuera = hoy > r.entrada;
     var env = ultimaNota(r, ['Formulario: enlace enviado', 'Formulario: enlace compartido', 'Formulario: enlace copiado', 'Formulario: enlace creado']);
     var rec = ultimaNota(r, ['Formulario recibido']), apl = ultimaNota(r, ['Formulario aplicado']);
-    if (!f) P.push(fuera ? { t: 'Formulario', e: 'pend', txt: 'No se envió', cq: '' }
-      : { t: 'Formulario', e: 'pend', txt: 'Sin enviar', cq: '', acc: { txt: 'Enviar', fn: function () { enviarEnlaceForm(r); } }, sig: 'Enviar el formulario al grupo' });
-    else if (f.estado === 'Recibido') P.push({ t: 'Formulario', e: 'aviso', txt: 'Recibido · falta revisar y aplicar', cq: cuandoQuien(rec) || fechaCorta(f.enviadoEl) + ' · Grupo',
+    if (!f) P.push(fuera ? { t: 'Formulario', ap: 'formulario', e: 'pend', txt: 'No se envió', cq: '' }
+      : { t: 'Formulario', ap: 'formulario', e: 'pend', txt: 'Sin enviar', cq: '', acc: { txt: 'Enviar', fn: function () { enviarEnlaceForm(r); } }, sig: 'Enviar el formulario al grupo' });
+    else if (f.estado === 'Recibido') P.push({ t: 'Formulario', ap: 'formulario', e: 'aviso', txt: 'Recibido · falta revisar y aplicar', cq: cuandoQuien(rec) || fechaCorta(f.enviadoEl) + ' · Grupo',
       acc: { txt: 'Revisar', fn: function () { ir('formulario/' + idq); } }, sig: 'Revisar y aplicar el formulario' });
-    else if (f.estado === 'Aplicado') P.push({ t: 'Formulario', e: 'ok', txt: 'Recibido y aplicado', cq: cuandoQuien(apl) });
-    else if (f.datos) P.push({ t: 'Formulario', e: 'ok', txt: 'Recibido', cq: fechaCorta(f.enviadoEl) + ' · Grupo' });
-    else if (f.estado === 'Cerrado' || fuera) P.push({ t: 'Formulario', e: 'pend', txt: 'Sin respuesta del grupo', cq: '' });
-    else P.push({ t: 'Formulario', e: 'ahora', txt: 'Enviado · esperando al grupo', cq: cuandoQuien(env), espera: true,
+    else if (f.estado === 'Aplicado') P.push({ t: 'Formulario', ap: 'formulario', e: 'ok', txt: 'Recibido y aplicado', cq: cuandoQuien(apl) });
+    else if (f.datos) P.push({ t: 'Formulario', ap: 'formulario', e: 'ok', txt: 'Recibido', cq: fechaCorta(f.enviadoEl) + ' · Grupo' });
+    else if (f.estado === 'Cerrado' || fuera) P.push({ t: 'Formulario', ap: 'formulario', e: 'pend', txt: 'Sin respuesta del grupo', cq: '' });
+    else P.push({ t: 'Formulario', ap: 'formulario', e: 'ahora', txt: 'Enviado · esperando al grupo', cq: cuandoQuien(env), espera: true,
       acc: { txt: 'Reenviar', fn: function () { enviarEnlaceForm(r); } } });
     // 3. Habitaciones
     if (aloj) {
       var rep = ultimaNota(r, ['Reparto de habitaciones']), n = (r.asignaciones || []).length;
       var reenv = f && f.enviadoEl && repartoSegun(r) && f.enviadoEl > repartoSegun(r);
-      if (!n) P.push({ t: 'Habitaciones', e: 'pend', txt: 'Sin reparto', cq: '', acc: { txt: 'Repartir', fn: function () { ir('reparto/' + idq); } }, sig: 'Hacer el reparto de habitaciones' });
-      else P.push({ t: 'Habitaciones', e: reenv ? 'aviso' : 'ok', txt: n + ' hab. · ' + pernoctan(r) + ' pers.' + (reenv ? ' · el grupo cambió su formulario' : ''),
+      if (!n) P.push({ t: 'Habitaciones', ap: 'habitaciones', e: 'pend', txt: 'Sin reparto', cq: '', acc: { txt: 'Repartir', fn: function () { ir('reparto/' + idq); } }, sig: 'Hacer el reparto de habitaciones' });
+      else P.push({ t: 'Habitaciones', ap: 'habitaciones', e: reenv ? 'aviso' : 'ok', txt: n + ' hab. · ' + pernoctan(r) + ' pers.' + (reenv ? ' · el grupo cambió su formulario' : ''),
         cq: cuandoQuien(rep), acc: { txt: reenv ? 'Revisar' : 'Ver', fn: function () { ir('reparto/' + idq); } }, sig: reenv ? 'Revisar el reparto de habitaciones' : '' });
     }
     // 4. Presupuesto y condiciones (2.1.0: un solo paso; el grupo los acepta con un enlace y paga la señal)
@@ -647,7 +647,7 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
     var cCq = fi && fi.estado === 'Firmado' ? fechaCorta(fi.firmadoEl) + ' · ' + fi.nombre : papel.enviado ? cuandoQuien(papel.b) : esperaFirma ? cuandoQuien(cEnv) : '';
     var fzMarca = fz.pagada ? { txt: 'Deshacer: señal', tipo: 'fianza_pendiente' } : { txt: 'Marcar señal pagada', tipo: 'fianza_pagada' };
     var verPre = { txt: 'Ver presupuesto', fn: function () { ir('hoja/' + idq + '?modo=presupuesto'); } };
-    P.push({ t: 'Presupuesto y condiciones', e: firmado && fz.pagada ? 'ok' : firmado || fz.pagada || esperaFirma ? 'ahora' : 'pend',
+    P.push({ t: 'Presupuesto y condiciones', ap: 'condiciones', e: firmado && fz.pagada ? 'ok' : firmado || fz.pagada || esperaFirma ? 'ahora' : 'pend',
       txt: cTxt + ' · Señal ' + (fz.pagada ? 'pagada' : 'pendiente'),
       cq: [cCq, fz.b ? 'señal ' + cuandoQuien(fz.b) : ''].filter(Boolean).join(' · '),
       acc: firmado ? { txt: 'Ver condiciones', fn: function () { ir('contrato/' + idq); } }
@@ -658,13 +658,13 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
       sigMarca: !firmado && !esperaFirma ? '' : 'fianza_pagada' });
     // 6. Estancia
     var dias = Math.round((aFecha(r.entrada) - aFecha(hoy)) / 864e5);
-    P.push(hoy < r.entrada ? { t: 'Estancia', e: 'pend', txt: 'Empieza ' + (dias === 1 ? 'mañana' : 'en ' + dias + ' días'), cq: '' }
-      : hoy <= r.salida ? { t: 'Estancia', e: 'ahora', txt: 'En curso hasta el ' + legible(r.salida).slice(0, 5), cq: '' }
-      : { t: 'Estancia', e: 'ok', txt: 'Terminada el ' + legible(r.salida).slice(0, 5), cq: '' });
+    P.push(hoy < r.entrada ? { t: 'Estancia', ap: 'estancia', e: 'pend', txt: 'Empieza ' + (dias === 1 ? 'mañana' : 'en ' + dias + ' días'), cq: '' }
+      : hoy <= r.salida ? { t: 'Estancia', ap: 'estancia', e: 'ahora', txt: 'En curso hasta el ' + legible(r.salida).slice(0, 5), cq: '' }
+      : { t: 'Estancia', ap: 'estancia', e: 'ok', txt: 'Terminada el ' + legible(r.salida).slice(0, 5), cq: '' });
     // 7. Liquidación
     var liq = marcaDoc(r, 'Liquidación enviada', 'Liquidación: marcada'), empezo = hoy >= r.entrada;
-    P.push(liq.enviado ? { t: 'Liquidación', e: 'ok', txt: 'Enviada', cq: cuandoQuien(liq.b), acc: { txt: 'Ver', fn: function () { ir('hoja/' + idq + '?modo=liquidacion'); } }, marca: { txt: 'Deshacer', tipo: 'liquidacion_no' } }
-      : { t: 'Liquidación', e: empezo ? 'ahora' : 'pend', txt: 'Pendiente', cq: '', acc: empezo ? { txt: 'Hacer', fn: function () { ir('hoja/' + idq + '?modo=liquidacion'); } } : null,
+    P.push(liq.enviado ? { t: 'Liquidación', ap: 'estancia', e: 'ok', txt: 'Enviada', cq: cuandoQuien(liq.b), acc: { txt: 'Ver', fn: function () { ir('hoja/' + idq + '?modo=liquidacion'); } }, marca: { txt: 'Deshacer', tipo: 'liquidacion_no' } }
+      : { t: 'Liquidación', ap: 'estancia', e: empezo ? 'ahora' : 'pend', txt: 'Pendiente', cq: '', acc: empezo ? { txt: 'Hacer', fn: function () { ir('hoja/' + idq + '?modo=liquidacion'); } } : null,
           marca: empezo ? { txt: 'Marcar enviada', tipo: 'liquidacion_enviada' } : null, sig: empezo ? 'Hacer y enviar la liquidación' : '' });
     return P;
   }
@@ -762,14 +762,20 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
     // Siguiente paso: el primero que se puede hacer ahora (sin contar lo que espera al grupo)
     var sig = pasos.filter(function (p) { return p.sig && p.e !== 'ok' && !p.espera; })[0];
     var ICON = { ok: '✓', ahora: '●', aviso: '!', pend: '○' };
-    function lineaPaso(p, i) {
+    // 2.1.2: la Evolución solo informa (al tocar una línea se abre su apartado); las acciones están en los apartados
+    function botonesPaso(p, i) {
       var btns = [];
-      if (p.acc) btns.push('<button class="paso-acc" data-p="' + i + '" data-k="acc">' + esc(p.acc.txt) + '</button>');
-      if (p.marca) btns.push('<button class="paso-acc" data-p="' + i + '" data-k="marca">' + esc(p.marca.txt) + '</button>');
-      (p.marcas || []).forEach(function (m, j) { btns.push('<button class="paso-acc" data-p="' + i + '" data-k="m' + j + '">' + esc(m.txt) + '</button>'); });
-      return '<div class="paso-l e-' + p.e + '"><span class="paso-i" aria-hidden="true">' + ICON[p.e] + '</span>' +
+      if (!p) return '';
+      if (p.acc) btns.push('<button class="btn sec" data-p="' + i + '" data-k="acc">' + esc(p.acc.txt) + '</button>');
+      if (p.marca) btns.push('<button class="btn sec" data-p="' + i + '" data-k="marca">' + esc(p.marca.txt) + '</button>');
+      (p.marcas || []).forEach(function (m, j) { btns.push('<button class="btn sec" data-p="' + i + '" data-k="m' + j + '">' + esc(m.txt) + '</button>'); });
+      return btns.length ? '<div class="fila-btns" style="margin-top:10px">' + btns.join('') + '</div>' : '';
+    }
+    function idxPaso(t) { for (var i = 0; i < pasos.length; i++) if (pasos[i].t === t) return i; return -1; }
+    function lineaPaso(p, i) {
+      return '<div class="paso-l e-' + p.e + (p.ap ? ' paso-ir" role="button" tabindex="0" data-ir="' + p.ap : '') + '"><span class="paso-i" aria-hidden="true">' + ICON[p.e] + '</span>' +
         '<div class="paso-t"><b>' + esc(p.t) + '</b> <span>' + esc(p.txt) + '</span>' + (p.cq ? '<small>' + esc(p.cq) + '</small>' : '') + '</div>' +
-        (btns.length ? '<div class="paso-b' + (btns.length > 1 ? ' dos' : '') + '">' + btns.join('') + '</div>' : '') + '</div>';
+        (p.ap ? '<span class="paso-flecha" aria-hidden="true">›</span>' : '') + '</div>';
     }
     var bit = r.bitacora || [], verTodo = S.bitTodo === r.id;
     var bitHtml = bit.length ? (verTodo ? bit : bit.slice(0, 5)).map(function (b) {
@@ -787,29 +793,36 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
       (r.modificadoPor && (marcaLegible(r.modificadoEl) !== marcaLegible(r.creadoEl) || r.modificadoPor !== r.creadoPor)
         ? ' · Modificada por ' + esc(r.modificadoPor) + entreParen(marcaLegible(r.modificadoEl)) : '') + '</p>' +
       '<div class="fila-btns" style="margin-top:10px">' + (tel && !canc ? '<a class="btn sec" href="tel:' + esc(tel) + '">Llamar</a>' : '') +
-      (!canc ? '<button class="btn sec" id="dEditar">Editar datos</button>' : '') + '</div>';
+      (!canc ? '<button class="btn sec" id="dEditar">Editar datos</button>' : '') + '</div>' +
+      (pasos[0] && pasos[0].acc ? botonesPaso(pasos[0], 0) : '');
     function apartado(clave, titulo, resumen, cuerpo) {
       return '<details class="apartado" data-ap="' + clave + '"' + (q.abrir === clave ? ' open' : '') + '><summary><b>' + titulo + '</b><span>' + resumen + '</span></summary><div class="ap-cuerpo">' + cuerpo + '</div></details>';
     }
+    var iCond = idxPaso('Presupuesto y condiciones'), iLiq = idxPaso('Liquidación');
     var fTarjeta = (!bloq && !canc) ? tarjetaFormulario(r).replace(/^<div class="tarjeta"><h2>Formulario del grupo<\/h2>/, '').replace(/<\/div>$/, '') : '';
     vista.innerHTML = botonVolver() +
       // Cabecera
       '<div class="tarjeta exp-cab ' + clases(r) + '"><h2>' + esc(r.grupo) + '</h2>' +
       '<div class="exp-fechas">' + esc(diaSemana(r.entrada)) + ' ' + esc(r.horaEntrada) + ' → ' + esc(diaSemana(r.salida)) + ' ' + esc(r.horaSalida) +
       (aloj ? ' · ' + noches(r) + ' noches' : '') + '</div>' + etiquetas(r) + '</div>' +
-      // Evolución
-      (pasos.length ? '<div class="tarjeta exp-pasos"><h2>Evolución</h2>' + pasos.map(lineaPaso).join('') + '</div>' : '') +
       // Siguiente paso
       (pasos.length ? '<div class="exp-sig">' + (sig ? '<span>Siguiente paso</span><button class="btn" id="dSig">' + esc(sig.sig) + '</button>'
         : '<span>' + (pasos.some(function (p) { return p.espera; }) ? 'Esperando respuesta del grupo.' : 'Todo al día.') + '</span>') + '</div>' : '') +
-      // Apartados plegados
+      // Apartados plegados (2.1.2: aquí están todas las acciones)
       apartado('datos', 'Datos de la reserva', esc(r.responsable || tipo(r)), datos) +
       (fTarjeta ? apartado('formulario', 'Formulario del grupo', esc(pasos[1] ? pasos[1].txt : ''), fTarjeta) : '') +
       (aloj && !canc ? apartado('habitaciones', 'Habitaciones', (r.asignaciones || []).length ? pernoctan(r) + ' pers. en ' + r.asignaciones.length + ' hab.' : 'Sin reparto',
         avisoReparto(r) + plano(r.asignaciones) + '<div class="fila-btns" style="margin-top:10px"><button class="btn sec" id="dReparto">Reparto de habitaciones</button>' +
         ((r.asignaciones || []).length ? '<button class="btn sec" id="dHojaHab">Hoja de habitaciones</button>' : '') + '</div>') : '') +
       (!bloq && !canc ? apartado('estancia', 'Hoja de estancia', '', '<p class="sub" style="margin:0 0 10px">' + resumenServicios(r) + '</p>' +
-        '<div class="fila-btns"><button class="btn sec" id="dServ">Servicios y datos</button><button class="btn sec" id="dHoja">Ver hoja de estancia</button></div>') : '') +
+        '<div class="fila-btns"><button class="btn sec" id="dServ">Servicios y datos</button><button class="btn sec" id="dHoja">Ver hoja de estancia</button></div>' +
+        (iLiq >= 0 ? '<p class="sub" style="margin:14px 0 0"><b>Liquidación:</b> ' + esc(pasos[iLiq].txt) + (pasos[iLiq].cq ? ' · ' + esc(pasos[iLiq].cq) : '') + '</p>' + botonesPaso(pasos[iLiq], iLiq) : '')) : '') +
+      (iCond >= 0 ? apartado('condiciones', 'Presupuesto y condiciones', esc(pasos[iCond].txt),
+        '<p class="sub" style="margin:0">' + esc(pasos[iCond].txt) + (pasos[iCond].cq ? '<br><small>' + esc(pasos[iCond].cq) + '</small>' : '') + '</p>' +
+        '<p class="sub" style="margin:8px 0 0;font-size:13px">El grupo recibe un enlace para ver el presupuesto, aceptar las condiciones y firmar. El pago de la señal confirma la reserva.</p>' +
+        botonesPaso(pasos[iCond], iCond)) : '') +
+      // Evolución (solo seguimiento)
+      (pasos.length ? '<div class="tarjeta exp-pasos"><h2>Evolución</h2>' + pasos.map(lineaPaso).join('') + '</div>' : '') +
       // Bitácora
       '<div class="tarjeta exp-bit"><h2>Bitácora</h2><ul class="bitacora">' + bitHtml + '</ul>' +
       '<div class="fila-btns" style="margin-top:8px"><button class="btn sec" id="dNota">+ Añadir nota</button>' +
@@ -820,7 +833,7 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
       '<button class="btn peligro borde-p" id="dBorrar">Borrar</button></div></div></details>';
     enlazarVolver();
     // Pasos
-    $$('.paso-acc').forEach(function (b) {
+    $$('[data-p][data-k]').forEach(function (b) {
       b.onclick = function () {
         var p = pasos[+b.dataset.p], k = b.dataset.k;
         if (k === 'acc') return p.acc.fn();
@@ -828,6 +841,14 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
         if (m.fn) return m.fn();
         anotar(r, m.tipo, '', 'Anotado en la bitácora');
       };
+    });
+    $$('.paso-ir').forEach(function (l) {
+      function abrir() {
+        var d = vista.querySelector('.apartado[data-ap="' + l.dataset.ir + '"]'); if (!d) return;
+        d.open = true; d.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+      l.onclick = abrir;
+      l.onkeydown = function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); abrir(); } };
     });
     if ($('#dSig')) $('#dSig').onclick = function () {
       if (sig.acc && !sig.sigMarca) return sig.acc.fn();
