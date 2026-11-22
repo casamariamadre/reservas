@@ -3,7 +3,8 @@
   'use strict';
   var C = window.CONFIG || {};
   var DEMO = !C.API_URL;
-  var VERSION = '1.4.0';
+  var VERSION = '2.0.2';
+  var VERSION_FECHA = '22/11/2026';
   var S = { clave: null, gestor: null, datos: null, mes: null, sinConexion: false, filtro: 'proximas', verCanceladas: false,
             relModo: 'todas', relDesde: '', relHasta: '', findesTodos: false };
   var $ = function (s, el) { return (el || document).querySelector(s); };
@@ -61,7 +62,13 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
     clearTimeout(toast._t);
     toast._t = setTimeout(function () { t.hidden = true; }, error ? 5500 : 2800);
   }
-  function cargando(on) { $('#cargando').hidden = !on; }
+  // El reloj solo aparece si la espera dura más de medio segundo (para que no parpadee en cada acción).
+  var relojT = null;
+  function cargando(on) {
+    clearTimeout(relojT);
+    if (on) relojT = setTimeout(function () { $('#cargando').hidden = false; }, 500);
+    else $('#cargando').hidden = true;
+  }
   function modal(html, alPulsar) {
     var m = $('#modal');
     m.innerHTML = '<div class="caja">' + html + '</div>';
@@ -80,52 +87,18 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
     });
   }
 
-  // ---------------- Comunicación con Google (o demostración) ----------------
-  var demoListo = null;
-  function cargarScript(src) {
-    return new Promise(function (ok, ko) { var s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = function () { ko(new Error('No se encuentra el archivo ' + src + '. ¿Se subió la carpeta «demo» a GitHub?')); }; document.head.appendChild(s); });
+  // ---------------- Datos (todo pasa por database.js) ----------------
+  /** Ejecuta una operación de database.js con el gestor actual y guarda el estado actualizado que devuelve. */
+  function usarDB(fn) {
+    DB.conectar({ gestor: S.gestor, clave: S.clave });
+    return fn().then(function (r) { if (r && r.estado) fijarDatos(r.estado); return r; });
   }
-  function prepararDemo() {
-    if (!demoListo) {
-      demoListo = cargarScript('demo/gas-mock.js').then(function () { return cargarScript('demo/codigo.js'); }).then(function () {
-        window.CLAVE_ACCESO = 'demo';
-        if (!lsGet('demoIniciada2')) {
-          window.__GAS_RESET__ && window.__GAS_RESET__();
-          window.configurar();
-          var p = function (d) { return window.atender({ clave: 'demo', gestor: 'Demo', accion: 'guardarReserva', datos: d }); };
-          var e1 = sumaDias(hoyTxt(), 5);
-          p({ reserva: { grupo: 'Retiro parroquial (ejemplo)', responsable: 'Ana López', telefono: '600000000', email: 'ana@ejemplo.es', entrada: e1, salida: sumaDias(e1, 2), estado: 'Confirmada' },
-            asignaciones: [{ habitacion: 16, personas: 3 }, { habitacion: 17, personas: 3 }, { habitacion: 19, personas: 5 }, { habitacion: 11, personas: 2 }] });
-          p({ reserva: { grupo: 'Lectura creyente (ejemplo)', tipo: 'Día / sala', responsable: 'Óscar M.', entrada: sumaDias(e1, 1), horaEntrada: '10:00', salida: sumaDias(e1, 1), horaSalida: '13:00', estado: 'Confirmada' } });
-          var e2 = sumaDias(e1, 16);
-          p({ reserva: { grupo: 'Ejercicios espirituales (ejemplo)', responsable: 'Luis Pérez', telefono: '611111111', entrada: e2, salida: sumaDias(e2, 3) },
-            asignaciones: [{ habitacion: 23, personas: 4 }, { habitacion: 24, personas: 4 }, { habitacion: 25, personas: 3 }] });
-          p({ reserva: { tipo: 'Bloqueo', grupo: 'DESCANSO', entrada: sumaDias(e2, 7), salida: sumaDias(e2, 8), estado: 'Confirmada' } });
-          var r = p({ reserva: { grupo: 'Grupo anulado (ejemplo)', responsable: 'Paqui', email: 'paqui@ejemplo.es', entrada: sumaDias(e1, 9), salida: sumaDias(e1, 11) } });
-          if (r && r.ok) window.atender({ clave: 'demo', gestor: 'Demo', accion: 'cancelarReserva', datos: { id: r.datos.id } });
-          lsSet('demoIniciada2', true);
-        }
-      });
-    }
-    return demoListo;
+  function cargarTodo() {
+    DB.conectar({ gestor: S.gestor, clave: S.clave });
+    return DB.cargarTodo().then(function (d) { fijarDatos(d); return d; });
   }
 
-  function api(accion, datos) {
-    var pet = { clave: S.clave, gestor: S.gestor, accion: accion, datos: datos || {} };
-    var p = DEMO
-      ? prepararDemo().then(function () { return new Promise(function (ok) { setTimeout(function () { ok(window.atender(JSON.parse(JSON.stringify(pet)))); }, 200); }); })
-      : fetch(C.API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(pet), redirect: 'follow' })
-          .then(function (r) { if (!r.ok) throw new Error('El servidor respondió ' + r.status); return r.json(); })
-          .catch(function (e) { if (e instanceof TypeError) { var x = new Error(navigator.onLine === false ? 'Sin conexión. Revisa la cobertura e inténtalo de nuevo.' : 'No se pudo conectar con Google. Revisa que API_URL termine en /exec y que el script esté implementado para «Cualquier usuario».'); x.red = true; throw x; } if (e instanceof SyntaxError) throw new Error('Google no devolvió datos válidos. Revisa la implementación del script.'); throw e; });
-    return p.then(function (r) {
-      if (!r || !r.ok) { var err = new Error((r && r.error) || 'Error desconocido'); err.codigo = r && r.codigo; throw err; }
-      if (r.datos && r.datos.estado) fijarDatos(r.datos.estado);
-      if (accion === 'inicial') fijarDatos(r.datos);
-      return r.datos;
-    });
-  }
-
-  function fijarDatos(d) { S.datos = d; S.sinConexion = false; lsSet('cache', { datos: d, cuando: Date.now() }); avisoConexion(); }
+  function fijarDatos(d) { S.datos = d; S.sinConexion = false; S.ultimaCarga = Date.now(); lsSet('cache', { datos: d, cuando: Date.now() }); avisoConexion(); }
 
   function avisoConexion() {
     var a = $('#aviso');
@@ -139,16 +112,17 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
     } else a.hidden = true;
   }
 
-  function editando() { var v = ruta().vista; return v === 'nueva' || v === 'editar'; }
+  /** Pantallas donde se escribe: aquí nunca se redibuja solo (para no perder lo escrito). */
+  function editando() { var v = ruta().vista; return v === 'nueva' || v === 'editar' || v === 'servicios' || v === 'admin' || v === 'reparto'; }
 
   /** Recarga datos. Si se está editando una reserva NO se redibuja (para no perder lo escrito). */
-  function recargar(silencioso) {
+  function recargar(silencioso, forzar) {
     if (!silencioso) cargando(true);
-    return api('inicial').then(function () { if (!editando()) pintar(); })
+    return cargarTodo().then(function () { if (forzar || !editando()) pintar(); })
       .catch(function (e) {
         if (e.codigo === 'CLAVE') return salir('La clave ya no es válida. Vuelve a entrar.');
         var c = lsGet('cache');
-        if (e.red && c) { S.datos = c.datos; S.sinConexion = true; avisoConexion(); if (!editando()) pintar(); }
+        if (c && (e.red || !S.datos)) { S.datos = c.datos; S.sinConexion = true; avisoConexion(); if (forzar || !editando()) pintar(); }
         else if (!silencioso) toast(e.message, true);
       })
       .then(function () { cargando(false); });
@@ -181,6 +155,7 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
     var t = '';
     if (r.estado === 'Cancelada') t += '<span class="etiqueta cancelada">Cancelada</span> ';
     else if (r.estado === 'Provisional' && tipo(r) !== 'Bloqueo') t += '<span class="etiqueta provisional">Provisional</span> ';
+    if (r.formulario && r.formulario.estado === 'Recibido' && r.estado !== 'Cancelada') t += '<span class="etiqueta form">Formulario recibido</span> ';
     if (tipo(r) !== 'Alojamiento') t += '<span class="etiqueta tipo">' + esc(tipo(r)) + '</span> ';
     if (esPasada(r) && r.estado !== 'Cancelada') t += '<span class="etiqueta pasada">Pasada</span> ';
     if (tipo(r) !== 'Bloqueo') {
@@ -205,7 +180,7 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
   }
 
   // ---------------- Navegación ----------------
-  var TITULOS = { calendario: 'Calendario', reservas: 'Reservas', nueva: 'Nueva reserva', editar: 'Editar reserva', reserva: 'Reserva', ajustes: 'Ajustes' };
+  var TITULOS = { calendario: 'Calendario', reservas: 'Reservas', nueva: 'Nueva reserva', editar: 'Editar reserva', reserva: 'Reserva', ajustes: 'Ajustes', admin: 'Administración', servicios: 'Servicios y datos', hoja: 'Hoja de estancia', formulario: 'Formulario del grupo', reparto: 'Reparto de habitaciones', habitaciones: 'Hoja de habitaciones', contrato: 'Contrato' };
   function ruta() {
     var h = location.hash.replace(/^#\/?/, '');
     var q = {}, partes = h.split('?');
@@ -217,8 +192,15 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
   var historial = 0;
   window.addEventListener('hashchange', function () { historial++; });
   function volver() { if (historial > 0 && history.length > 1) history.back(); else ir('calendario'); }
-  function botonVolver() { return '<button class="volver" id="bVolver"><span>‹</span> Volver</button>'; }
-  function enlazarVolver(antes) { var b = $('#bVolver'); if (b) b.onclick = function () { if (antes) antes(); volver(); }; }
+  // 1.9.0: «Volver» va abajo: en la barra de «Guardar» si la hay; si no, en una barra propia.
+  function botonVolver() { return ''; }
+  function enlazarVolver(antes) {
+    var pie = vista.querySelector('.pie-form');
+    var b = '<button type="button" class="btn borde js-volver">‹ Volver</button>';
+    if (pie) pie.insertAdjacentHTML('afterbegin', b);
+    else vista.insertAdjacentHTML('beforeend', '<div class="pie-form pie-volver">' + b + '</div>');
+    $$('.js-volver').forEach(function (x) { x.onclick = function () { if (antes) antes(); volver(); }; });
+  }
 
   function pintar() {
     if (!S.clave) return pintarLogin();
@@ -228,7 +210,7 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
     $('#tituloVista').textContent = TITULOS[r.vista] || '';
     document.body.setAttribute('data-vista', r.vista);
     $$('.menu button').forEach(function (b) {
-      b.classList.toggle('activo', b.dataset.ir === r.vista || (b.dataset.ir === 'reservas' && r.vista === 'reserva'));
+      b.classList.toggle('activo', b.dataset.ir === r.vista || (b.dataset.ir === 'reservas' && (r.vista === 'reserva' || r.vista === 'servicios' || r.vista === 'hoja' || r.vista === 'formulario' || r.vista === 'reparto' || r.vista === 'habitaciones' || r.vista === 'contrato')) || (b.dataset.ir === 'ajustes' && r.vista === 'admin'));
     });
     vista.scrollTop = 0; window.scrollTo(0, 0);
     switch (r.vista) {
@@ -237,6 +219,13 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
       case 'nueva': return pintarFormulario(null, r.q);
       case 'editar': return pintarFormulario(r.id, r.q);
       case 'ajustes': return pintarAjustes();
+      case 'admin': return pintarAdmin();
+      case 'servicios': return pintarServicios(r.id);
+      case 'hoja': return pintarHoja(r.id, r.q.modo);
+      case 'formulario': return pintarFormularioRecibido(r.id);
+      case 'reparto': return pintarReparto(r.id);
+      case 'habitaciones': return pintarHojaHab(r.id);
+      case 'contrato': return pintarContrato(r.id);
       default: return pintarCalendario();
     }
   }
@@ -255,7 +244,8 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
       gestores.map(function (g) { return '<button type="button" class="chip' + (g === elegido ? ' activo' : '') + '">' + esc(g) + '</button>'; }).join('') +
       '</div><label class="campo" style="margin-top:12px"><span>Tu clave</span><input class="entrada" id="lClave" type="password" inputmode="numeric" autocomplete="current-password" placeholder="' + (DEMO ? 'En demostración: demo' : 'Clave personal') + '"></label>' +
       '<p class="error-txt" id="lError">' + esc(msg || '') + '</p>' +
-      '<button class="btn ancho" id="lEntrar" style="margin-top:14px">Entrar</button></div></div>';
+      '<button class="btn ancho" id="lEntrar" style="margin-top:14px">Entrar</button></div>' +
+      '<p class="sub" style="text-align:center;font-size:12px;margin-top:14px">Versión ' + VERSION + ' · ' + VERSION_FECHA + '</p></div>';
     $('#lGestores').onclick = function (e) {
       var b = e.target.closest('.chip'); if (!b) return;
       $$('.chip', this).forEach(function (c) { c.classList.remove('activo'); });
@@ -268,7 +258,7 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
       if (!clave) return ($('#lError').textContent = 'Escribe tu clave.');
       S.clave = clave; S.gestor = elegido;
       cargando(true);
-      api('inicial').then(function () {
+      cargarTodo().then(function () {
         lsSet('clave', clave); lsSet('gestor', elegido);
         if (!location.hash || location.hash === '#/') location.hash = '/calendario'; else pintar();
       }).catch(function (e) {
@@ -328,7 +318,7 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
           '<span class="punto"></span><span class="t">' + txt + '</span></button>';
       }).join('');
       var mas = ocultos.map(function (n, i) { return n ? '<span class="mas" style="grid-column:' + (i + 1) + ';grid-row:' + (MAXC + 2) + '">+' + n + '</span>' : ''; }).join('');
-      semanas += '<div class="semana" style="grid-template-rows:22px repeat(' + Math.max(1, Math.min(carriles.length, MAXC)) + ',auto)' + (ocultos.some(Boolean) ? ' 16px' : '') + ' 4px">' + celdas + franjas + mas + '</div>';
+      semanas += '<div class="semana" style="grid-template-rows:22px repeat(' + Math.max(1, Math.min(carriles.length, MAXC)) + ',auto)' + (ocultos.some(Boolean) ? ' 16px' : '') + ' minmax(4px, 1fr)">' + celdas + franjas + mas + '</div>';
     }
     var esHoy = m.getFullYear() === hoy.getFullYear() && m.getMonth() === hoy.getMonth();
     vista.innerHTML =
@@ -375,6 +365,9 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
       });
   }
 
+  /** Atajo «✓ Confirmar» (en la ficha) para provisionales futuras: abre la edición ya marcada como Confirmada. */
+  function puedeConfirmar(r) { return r.estado === 'Provisional' && tipo(r) !== 'Bloqueo' && !esPasada(r); }
+
   function tarjetaReserva(r) {
     var f = aFecha(r.entrada);
     return '<button class="reserva ' + clases(r) + '" data-id="' + esc(r.id) + '">' +
@@ -403,7 +396,7 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
     if ($('#rHasta')) $('#rHasta').onchange = function () { S.relHasta = this.value; pintarReservas(); };
     if ($('#fTodos')) $('#fTodos').onchange = function () { S.findesTodos = this.checked; pintarReservas(); };
     if ($('#rPdf')) $('#rPdf').onclick = function () { document.body.classList.add('imprimiendo'); window.print(); setTimeout(function () { document.body.classList.remove('imprimiendo'); }, 500); };
-    if ($('#rWord')) $('#rWord').onclick = exportarWord;
+    if ($('#rCopiar')) $('#rCopiar').onclick = pedirCopia;
     $$('.findes [data-f]').forEach(function (b) { b.onclick = function () { ir('nueva?fecha=' + b.dataset.f + '&salida=' + b.dataset.s); }; });
     $$('.rel-item[data-id]').forEach(function (b) { b.onclick = function () { ir('reserva/' + encodeURIComponent(b.dataset.id)); }; });
     enlazarTarjetas();
@@ -421,9 +414,11 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
   }
 
   /** Relación cronológica con el formato habitual de la casa, mejorado. */
-  function datosRelacion() {
+  function datosRelacion(d1, d2) {
     var rango = S.relModo === 'rango';
-    var desde = rango && S.relDesde ? S.relDesde : '', hasta = rango && S.relHasta ? S.relHasta : '9999-12-31';
+    // «Próximas y en curso»: las que aún no han terminado (salida hoy o después). «Entre fechas» permite ver las pasadas.
+    var desde = rango ? (S.relDesde || '') : hoyTxt(), hasta = rango && S.relHasta ? S.relHasta : '9999-12-31';
+    if (d1 != null) { desde = d1; hasta = d2; }
     var lista = ordenar(reservas().filter(function (r) { return r.salida >= desde && r.entrada <= hasta; }));
     var grupos = [], actual = null;
     lista.forEach(function (r) {
@@ -460,39 +455,85 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
     }).join('');
     var rango = S.relModo === 'rango';
     return '<div class="tarjeta rel-filtro"><div class="segmento" id="rModo">' +
-      '<button data-m="todas" class="' + (!rango ? 'activo' : '') + '">Todas las reservas</button>' +
+      '<button data-m="todas" class="' + (!rango ? 'activo' : '') + '">Próximas y en curso</button>' +
       '<button data-m="rango" class="' + (rango ? 'activo' : '') + '">Entre fechas</button></div>' +
       (rango ? '<div class="dos" style="margin-top:10px"><label class="campo"><span>Desde</span><input class="entrada" id="rDesde" type="date" value="' + esc(S.relDesde) + '"></label>' +
         '<label class="campo"><span>Hasta</span><input class="entrada" id="rHasta" type="date" value="' + esc(S.relHasta) + '"></label></div>' : '') +
-      '<div class="fila-btns" style="margin-top:6px"><button class="btn sec" id="rPdf">PDF / Imprimir</button><button class="btn sec" id="rWord">Word</button></div></div>' +
+      '<div class="fila-btns" style="margin-top:6px"><button class="btn sec" id="rPdf">PDF / Imprimir</button><button class="btn sec" id="rCopiar">Copiar reservas</button></div></div>' +
       '<div class="tarjeta" id="relacion"><div class="rel-cab">Lista de reservas · ' + esc(C.NOMBRE_CASA || '') + '<small>' + esc(textoRango()) + '</small></div>' +
       (cuerpo || '<div class="vacio">No hay reservas.</div>') + '</div>';
   }
   function textoRango() {
-    if (S.relModo !== 'rango' || (!S.relDesde && !S.relHasta)) return 'Todas las reservas';
+    if (S.relModo !== 'rango') return 'Próximas y en curso (desde el ' + legible(hoyTxt()) + ')';
+    if (!S.relDesde && !S.relHasta) return 'Todas las reservas';
     return (S.relDesde ? 'Desde ' + legible(S.relDesde) : 'Hasta') + (S.relDesde && S.relHasta ? ' hasta ' : ' ') + (S.relHasta ? legible(S.relHasta) : '');
   }
-  function exportarWord() {
-    var grupos = datosRelacion();
-    var html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8">' +
-      '<style>body{font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#222}h1{font-family:Georgia,serif;color:#85200C;font-size:16pt;margin:0 0 4pt}' +
-      'h2{font-size:12pt;color:#89588B;margin:18pt 0 6pt;border-bottom:1px solid #DAD6E4}p{margin:0 0 14pt;line-height:1.35}.d{color:#666;font-size:9.5pt}' +
-      '.o{color:#666;font-size:9.5pt;font-style:italic}.c{text-decoration:line-through;color:#999}.e{font-size:8.5pt;font-weight:bold}</style></head><body>' +
-      '<h1>Lista de reservas · ' + esc(C.NOMBRE_CASA || '') + '</h1><p class="d">' + esc(textoRango()) + ' · generada el ' + legible(hoyTxt()) + '</p>' +
-      grupos.map(function (g) {
-        return '<h2>' + g.mes + ' ' + g.anio + '</h2>' + g.items.map(function (r) {
-          var l = lineaRelacion(r);
-          var est = r.estado === 'Cancelada' ? ' <span class="e" style="color:#B42318">CANCELADA</span>' : (r.estado === 'Provisional' && tipo(r) !== 'Bloqueo') ? ' <span class="e" style="color:#B7791F">PROVISIONAL</span>' : '';
-          return '<p><span' + (l.cancelada ? ' class="c"' : '') + '>&#9632; <b>' + l.dias + ':</b> ' + (l.negrita ? '<b>' + l.titulo + '</b>' : l.titulo) +
-            (tipo(r) === 'Día / sala' ? ' (sin alojamiento)' : '') + '</span>' + est +
-            (l.detalle ? '<br><span class="d">' + l.detalle.replace(/<[^>]+>/g, '') + '</span>' : '') + (l.obs ? '<br><span class="o">' + l.obs + '</span>' : '') + '</p>';
-        }).join('');
-      }).join('') + '</body></html>';
-    var blob = new Blob(['﻿', html], { type: 'application/msword' });
-    var a = document.createElement('a');
-    a.href = URL.createObjectURL(blob); a.download = 'Lista_reservas_' + hoyTxt() + '.doc';
-    document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
-    toast('Documento de Word descargado');
+  /** «Copiar reservas»: primero se elige el periodo; luego se copia la lista con formato (para pegar en Word, correo…). */
+  function pedirCopia() {
+    var rango = S.relModo === 'rango';
+    var d1 = rango && S.relDesde ? S.relDesde : hoyTxt();
+    var d2 = rango && S.relHasta ? S.relHasta : sumaDias(d1, 90);
+    modal('<p style="margin-bottom:8px"><b>Copiar reservas</b></p><p class="sub" style="margin:0 0 10px">Elige el periodo. Después podrás pegar la lista, con su formato, en Word, en un correo o en otro programa.</p>' +
+      '<div class="dos"><label class="campo"><span>Desde</span><input class="entrada" id="cDesde" type="date" value="' + esc(d1) + '"></label>' +
+      '<label class="campo"><span>Hasta</span><input class="entrada" id="cHasta" type="date" value="' + esc(d2) + '"></label></div>' +
+      '<p class="error-txt" id="cError"></p>' +
+      '<div class="fila-btns" style="margin-top:8px"><button class="btn borde" data-r="0">Cancelar</button><button class="btn" data-r="1">Copiar</button></div>',
+      function (e, cerrar) {
+        var b = e.target.closest('[data-r]'); if (!b) return;
+        if (b.dataset.r === '0') return cerrar();
+        var a = $('#cDesde').value, z = $('#cHasta').value;
+        if (!a || !z) { $('#cError').textContent = 'Indica las dos fechas.'; return; }
+        if (z < a) { $('#cError').textContent = '«Hasta» debe ser posterior a «Desde».'; return; }
+        var n = copiarReservas(a, z);
+        cerrar();
+        if (n === false) toast('Este navegador no deja copiar. Usa «PDF / Imprimir».', true);
+        else toast(n ? 'Copiadas ' + n + (n === 1 ? ' reserva' : ' reservas') + '. Ya puedes pegarlas.' : 'No hay reservas en ese periodo.', !n);
+      });
+  }
+  function copiarReservas(desde, hasta) {
+    var grupos = datosRelacion(desde, hasta), n = 0;
+    var st = { t: 'font-family:Georgia,serif;color:#85200C;font-size:16pt;font-weight:bold;margin:0 0 4pt',
+      m: 'font-family:Calibri,Arial,sans-serif;font-size:12pt;font-weight:bold;color:#89588B;margin:14pt 0 4pt;border-bottom:1px solid #DAD6E4',
+      p: 'font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#222;margin:0 0 10pt;line-height:1.35',
+      d: 'color:#666;font-size:9.5pt', o: 'color:#666;font-size:9.5pt;font-style:italic' };
+    var periodo = 'Del ' + legible(desde) + ' al ' + legible(hasta);
+    var html = '<div><p style="' + st.t + '">Lista de reservas · ' + esc(C.NOMBRE_CASA || '') + '</p><p style="' + st.p + ';' + st.d + '">' + periodo + '</p>';
+    var txt = 'LISTA DE RESERVAS · ' + (C.NOMBRE_CASA || '') + '\n' + periodo + '\n';
+    grupos.forEach(function (g) {
+      html += '<p style="' + st.m + '">' + g.mes + ' ' + g.anio + '</p>';
+      txt += '\n' + g.mes.toUpperCase() + ' ' + g.anio + '\n';
+      g.items.forEach(function (r) {
+        n++;
+        var l = lineaRelacion(r), det = l.detalle.replace(/<[^>]+>/g, '');
+        var est = r.estado === 'Cancelada' ? 'CANCELADA' : (r.estado === 'Provisional' && tipo(r) !== 'Bloqueo') ? 'PROVISIONAL' : '';
+        html += '<p style="' + st.p + '"><span' + (l.cancelada ? ' style="text-decoration:line-through;color:#999"' : '') + '>&#9632; <b>' + l.dias + ':</b> ' +
+          (l.negrita ? '<b>' + l.titulo + '</b>' : l.titulo) + (tipo(r) === 'Día / sala' ? ' (sin alojamiento)' : '') + '</span>' +
+          (est ? ' <b style="font-size:8.5pt;color:' + (est === 'CANCELADA' ? '#B42318' : '#B7791F') + '">' + est + '</b>' : '') +
+          (det ? '<br><span style="' + st.d + '">' + det + '</span>' : '') + (l.obs ? '<br><span style="' + st.o + '">' + l.obs + '</span>' : '') + '</p>';
+        var plano = function (h) { var x = document.createElement('div'); x.innerHTML = h; return x.textContent; };
+        txt += '■ ' + l.dias + ': ' + plano(l.titulo) + (tipo(r) === 'Día / sala' ? ' (sin alojamiento)' : '') + (est ? ' · ' + est : '') + '\n' +
+          (det ? '   ' + plano(det) + '\n' : '') + (l.obs ? '   ' + plano(l.obs) + '\n' : '');
+      });
+    });
+    html += '</div>';
+    if (!n) return 0;
+    try {
+      if (navigator.clipboard && window.ClipboardItem) {
+        navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([html], { type: 'text/html' }), 'text/plain': new Blob([txt], { type: 'text/plain' }) })])
+          .catch(function () { if (!copiaAntigua(html)) toast('No se pudo copiar. Usa «PDF / Imprimir».', true); });
+        return n;
+      }
+      return copiaAntigua(html) ? n : false;
+    } catch (e) { return copiaAntigua(html) ? n : false; }
+  }
+  function copiaAntigua(html) {
+    var d = document.createElement('div');
+    d.contentEditable = 'true'; d.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
+    d.innerHTML = html; document.body.appendChild(d);
+    var rg = document.createRange(); rg.selectNodeContents(d);
+    var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(rg);
+    var ok = false; try { ok = document.execCommand('copy'); } catch (e) {}
+    sel.removeAllRanges(); d.remove(); return ok;
   }
 
   /** Próximos fines de semana: libres, con provisionales, ocupados. */
@@ -538,55 +579,282 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
   }
 
   // ---------------- Detalle ----------------
+  // ---------------- 1.9.0 · Ficha de la reserva: evolución, siguiente paso y bitácora ----------------
+  /** Última anotación de la bitácora cuya acción empieza por alguno de los textos dados. */
+  function ultimaNota(r, acciones) {
+    return (r.bitacora || []).filter(function (b) { return acciones.some(function (a) { return b.accion.indexOf(a) === 0; }); })[0] || null;
+  }
+  function cuandoQuien(b) { return b ? fechaCorta(b.fecha) + ' · ' + b.gestor : ''; }
+  function fechaCorta(m) { var t = String(m || ''); return t ? legible(t.slice(0, 10)).slice(0, 5) : ''; }
+  /** Estado de un documento según su última marca: { enviado, b } */
+  function marcaDoc(r, si, no) { var b = ultimaNota(r, [si, no]); return { enviado: !!(b && b.accion.indexOf(si) === 0), b: b }; }
+  function fianzaPagada(r) {
+    var b = ultimaNota(r, ['Fianza pagada', 'Fianza pendiente']);
+    if (b) return { pagada: b.accion === 'Fianza pagada', b: b };
+    var s = parseFloat(String((r.grupoDatos || {}).senal || '').replace(',', '.'));
+    return { pagada: s > 0, b: null };
+  }
+
+  /** Los pasos de la reserva, con su estado: ok (hecho), ahora (en curso), aviso (revisar), pend (pendiente). */
+  function pasosReserva(r) {
+    var P = [], hoy = hoyTxt(), aloj = tipo(r) === 'Alojamiento', idq = encodeURIComponent(r.id);
+    // 1. Reserva
+    var conf = ultimaNota(r, ['Reserva confirmada']), crea = ultimaNota(r, ['Crear']);
+    P.push(r.estado === 'Confirmada'
+      ? { t: 'Reserva', e: 'ok', txt: 'Confirmada', cq: cuandoQuien(conf) }
+      : { t: 'Reserva', e: 'ahora', txt: 'Provisional', cq: cuandoQuien(crea) || (r.creadoPor ? fechaCorta(r.creadoEl) + ' · ' + r.creadoPor : ''),
+          acc: { txt: 'Confirmar', fn: function () { ir('editar/' + idq + '?confirmar=1'); } }, sig: 'Confirmar la reserva' });
+    // 2. Formulario del grupo
+    var f = r.formulario, fuera = hoy > r.entrada;
+    var env = ultimaNota(r, ['Formulario: enlace enviado', 'Formulario: enlace compartido', 'Formulario: enlace copiado', 'Formulario: enlace creado']);
+    var rec = ultimaNota(r, ['Formulario recibido']), apl = ultimaNota(r, ['Formulario aplicado']);
+    if (!f) P.push(fuera ? { t: 'Formulario', e: 'pend', txt: 'No se envió', cq: '' }
+      : { t: 'Formulario', e: 'pend', txt: 'Sin enviar', cq: '', acc: { txt: 'Enviar', fn: function () { enviarEnlaceForm(r); } }, sig: 'Enviar el formulario al grupo' });
+    else if (f.estado === 'Recibido') P.push({ t: 'Formulario', e: 'aviso', txt: 'Recibido · falta revisar y aplicar', cq: cuandoQuien(rec) || fechaCorta(f.enviadoEl) + ' · Grupo',
+      acc: { txt: 'Revisar', fn: function () { ir('formulario/' + idq); } }, sig: 'Revisar y aplicar el formulario' });
+    else if (f.estado === 'Aplicado') P.push({ t: 'Formulario', e: 'ok', txt: 'Recibido y aplicado', cq: cuandoQuien(apl) });
+    else if (f.datos) P.push({ t: 'Formulario', e: 'ok', txt: 'Recibido', cq: fechaCorta(f.enviadoEl) + ' · Grupo' });
+    else if (f.estado === 'Cerrado' || fuera) P.push({ t: 'Formulario', e: 'pend', txt: 'Sin respuesta del grupo', cq: '' });
+    else P.push({ t: 'Formulario', e: 'ahora', txt: 'Enviado · esperando al grupo', cq: cuandoQuien(env), espera: true,
+      acc: { txt: 'Reenviar', fn: function () { enviarEnlaceForm(r); } } });
+    // 3. Habitaciones
+    if (aloj) {
+      var rep = ultimaNota(r, ['Reparto de habitaciones']), n = (r.asignaciones || []).length;
+      var reenv = f && f.enviadoEl && repartoSegun(r) && f.enviadoEl > repartoSegun(r);
+      if (!n) P.push({ t: 'Habitaciones', e: 'pend', txt: 'Sin reparto', cq: '', acc: { txt: 'Repartir', fn: function () { ir('reparto/' + idq); } }, sig: 'Hacer el reparto de habitaciones' });
+      else P.push({ t: 'Habitaciones', e: reenv ? 'aviso' : 'ok', txt: n + ' hab. · ' + pernoctan(r) + ' pers.' + (reenv ? ' · el grupo cambió su formulario' : ''),
+        cq: cuandoQuien(rep), acc: { txt: reenv ? 'Revisar' : 'Ver', fn: function () { ir('reparto/' + idq); } }, sig: reenv ? 'Revisar el reparto de habitaciones' : '' });
+    }
+    // 4. Presupuesto
+    var pre = marcaDoc(r, 'Presupuesto enviado', 'Presupuesto: marcado');
+    P.push(pre.enviado ? { t: 'Presupuesto', e: 'ok', txt: 'Enviado', cq: cuandoQuien(pre.b), acc: { txt: 'Ver', fn: function () { ir('hoja/' + idq + '?modo=presupuesto'); } }, marca: { txt: 'Deshacer', tipo: 'presupuesto_no' } }
+      : { t: 'Presupuesto', e: 'pend', txt: 'Sin enviar', cq: '', acc: { txt: 'Ver', fn: function () { ir('hoja/' + idq + '?modo=presupuesto'); } },
+          marca: { txt: 'Marcar enviado', tipo: 'presupuesto_enviado' }, sig: 'Enviar el presupuesto' });
+    // 5. Contrato y fianza
+    // 2.0.0: el contrato se firma desde el móvil (o se marca «firmado en papel»)
+    var fi = r.firma, papel = marcaDoc(r, 'Contrato firmado en papel', 'Contrato: marcado sin firmar'), fz = fianzaPagada(r);
+    var cEnv = ultimaNota(r, ['Contrato enviado', 'Contrato: enlace creado']);
+    var firmado = (fi && fi.estado === 'Firmado') || papel.enviado, esperaFirma = !firmado && fi && fi.estado === 'Pendiente';
+    var cTxt = fi && fi.estado === 'Firmado' ? 'firmado por ' + fi.nombre : papel.enviado ? 'firmado en papel' : esperaFirma ? 'enviado, esperando firma' : 'sin enviar';
+    var cCq = fi && fi.estado === 'Firmado' ? fechaCorta(fi.firmadoEl) + ' · ' + fi.nombre : papel.enviado ? cuandoQuien(papel.b) : esperaFirma ? cuandoQuien(cEnv) : '';
+    var fzMarca = fz.pagada ? { txt: 'Deshacer: fianza', tipo: 'fianza_pendiente' } : { txt: 'Marcar fianza pagada', tipo: 'fianza_pagada' };
+    P.push({ t: 'Contrato y fianza', e: firmado && fz.pagada ? 'ok' : firmado || fz.pagada || esperaFirma ? 'ahora' : 'pend',
+      txt: 'Contrato ' + cTxt + ' · Fianza ' + (fz.pagada ? 'pagada' : 'pendiente'),
+      cq: [cCq, fz.b ? 'fianza ' + cuandoQuien(fz.b) : ''].filter(Boolean).join(' · '),
+      acc: firmado ? { txt: 'Ver contrato', fn: function () { ir('contrato/' + idq); } }
+        : { txt: esperaFirma ? 'Reenviar' : 'Enviar para firmar', fn: function () { enviarContrato(r); } },
+      marcas: (firmado ? [] : [{ txt: 'Firmado en papel', tipo: 'contrato_papel' }]).concat(papel.enviado ? [{ txt: 'Deshacer: papel', tipo: 'contrato_papel_no' }] : []).concat([fzMarca]),
+      espera: esperaFirma && fz.pagada,
+      sig: !firmado && !esperaFirma ? 'Enviar el contrato para firmar' : !fz.pagada ? 'Comprobar la fianza' : '',
+      sigMarca: !firmado && !esperaFirma ? '' : 'fianza_pagada' });
+    // 6. Estancia
+    var dias = Math.round((aFecha(r.entrada) - aFecha(hoy)) / 864e5);
+    P.push(hoy < r.entrada ? { t: 'Estancia', e: 'pend', txt: 'Empieza ' + (dias === 1 ? 'mañana' : 'en ' + dias + ' días'), cq: '' }
+      : hoy <= r.salida ? { t: 'Estancia', e: 'ahora', txt: 'En curso hasta el ' + legible(r.salida).slice(0, 5), cq: '' }
+      : { t: 'Estancia', e: 'ok', txt: 'Terminada el ' + legible(r.salida).slice(0, 5), cq: '' });
+    // 7. Liquidación
+    var liq = marcaDoc(r, 'Liquidación enviada', 'Liquidación: marcada'), empezo = hoy >= r.entrada;
+    P.push(liq.enviado ? { t: 'Liquidación', e: 'ok', txt: 'Enviada', cq: cuandoQuien(liq.b), acc: { txt: 'Ver', fn: function () { ir('hoja/' + idq + '?modo=liquidacion'); } }, marca: { txt: 'Deshacer', tipo: 'liquidacion_no' } }
+      : { t: 'Liquidación', e: empezo ? 'ahora' : 'pend', txt: 'Pendiente', cq: '', acc: empezo ? { txt: 'Hacer', fn: function () { ir('hoja/' + idq + '?modo=liquidacion'); } } : null,
+          marca: empezo ? { txt: 'Marcar enviada', tipo: 'liquidacion_enviada' } : null, sig: empezo ? 'Hacer y enviar la liquidación' : '' });
+    return P;
+  }
+
+  function enviarEnlaceForm(r) {
+    if (S.sinConexion) return toast('Sin conexión.', true);
+    cargando(true);
+    usarDB(function () { return DB.prepararFormulario(r.id); })
+      .then(function (d) { cargando(false); compartirEnlace(reserva(r.id) || r, d.enlace); })
+      .catch(function (e) { cargando(false); toast(e.message, true); });
+  }
+  function enviarContrato(r) {
+    if (S.sinConexion) return toast('Sin conexión.', true);
+    var h = calcularHoja(r);
+    var seguir = h.total > 0 ? Promise.resolve(true)
+      : confirmar('La hoja de estancia de esta reserva no tiene importe (no hay servicios). El contrato saldría sin precio. ¿Enviarlo igualmente?', 'Enviar igualmente');
+    seguir.then(function (ok) {
+      if (!ok) return;
+      cargando(true);
+      usarDB(function () { return DB.enlaceContrato(r.id, h.total); })
+        .then(function (d) { cargando(false); compartirEnlace(reserva(r.id) || r, d.enlace, 'contrato'); })
+        .catch(function (e) { cargando(false); toast(e.message, true); });
+    });
+  }
+
+  // ---------------- 2.0.0 · Contrato (ver / imprimir, firmado o vista previa) ----------------
+  function htmlContrato(d) {
+    var doc = d.documento || {}, c = doc.consentimiento || {}, casa = d.casa || {};
+    var cuerpo = (doc.bloques || []).map(function (b) {
+      var x = esc(b.x);
+      return b.t === 'h' ? '<h3 class="ct-h">' + x + '</h3>' : b.t === 'c' ? '<h4 class="ct-c">' + x + '</h4>' : b.t === 'd' ? '<p class="ct-d">' + x + '</p>' : '<p>' + x + '</p>';
+    }).join('');
+    var firmaSvg = d.firma ? '<svg class="ct-firma" viewBox="0 0 600 200" preserveAspectRatio="xMidYMid meet"><path d="' + esc(d.firma) + '" fill="none" stroke="#123" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>' : '<div class="ct-firma vacia"></div>';
+    return '<div class="hoja-doc contrato-doc">' + cuerpo +
+      '<h3 class="ct-h">INFORMACIÓN SOBRE PROTECCIÓN DE DATOS</h3>' + String(c.datos || '').split(/\n+/).map(function (p) { return '<p>' + esc(p) + '</p>'; }).join('') +
+      '<p><b>' + (d.firmado ? (d.imagenes ? '☑' : '☐') : '☐') + '</b> ' + esc(c.imagenes || '') + '</p>' +
+      '<p><b>Declaración:</b> ' + esc(c.autorizacion || '') + '</p>' +
+      '<div class="ct-firmas"><div><small>Por el prestador del servicio</small><div class="ct-firma vacia"></div><b>' + esc(casa.firmante || '') + '</b><br>' + esc(casa.cargo || '') + '</div>' +
+      '<div><small>Por el cliente</small>' + firmaSvg + '<b>' + esc(d.nombre || '') + '</b>' + (d.dni ? '<br>DNI ' + esc(d.dni) : '') + (d.cargo ? ' · ' + esc(d.cargo) : '') +
+      (d.firmado ? '<br><small>Firmado electrónicamente el ' + esc(marcaLegible(d.firmadoEl)) + '</small>' : '') + '</div></div></div>';
+  }
+  function pintarContrato(id) {
+    var r = reserva(id);
+    if (!r) { vista.innerHTML = botonVolver() + '<div class="vacio">La reserva no existe.</div>'; enlazarVolver(); return; }
+    vista.innerHTML = '<div class="vacio">Cargando el contrato…</div>';
+    cargando(true);
+    usarDB(function () { return DB.verContrato(r.id, r.firma && r.firma.importe ? undefined : calcularHoja(r).total); }).then(function (d) {
+      cargando(false);
+      vista.innerHTML = '<div class="hoja-barra"><div class="fila-btns">' + (!d.firmado ? '<button class="btn sec" id="ctEnviar">Enviar para firmar</button>' : '') +
+        '<button class="btn" id="ctPdf">Imprimir / PDF</button></div>' +
+        (d.firmado ? '<p class="sub" style="margin:8px 0 0">Firmado por <b>' + esc(d.nombre) + '</b> el ' + esc(marcaLegible(d.firmadoEl)) + '.</p>'
+          : '<p class="sub" style="margin:8px 0 0">Vista previa: aún no está firmado.' + (d.incompleto ? ' <b>Falta completar el texto del contrato en Administración › Contrato.</b>' : '') + '</p>') + '</div>' +
+        '<div class="hoja-marco">' + htmlContrato(d) + '</div>';
+      enlazarVolver();
+      if ($('#ctEnviar')) $('#ctEnviar').onclick = function () { enviarContrato(r); };
+      $('#ctPdf').onclick = function () {
+        var t = document.title; document.title = 'Contrato · ' + r.grupo;
+        document.body.classList.add('imprimiendo-hoja'); window.print();
+        setTimeout(function () { document.body.classList.remove('imprimiendo-hoja'); document.title = t; }, 800);
+      };
+    }).catch(function (e) { cargando(false); vista.innerHTML = '<div class="vacio">' + esc(e.message) + '</div>'; enlazarVolver(); });
+  }
+
+  function anotar(r, tipoNota, texto, ok) {
+    if (S.sinConexion) return toast('Sin conexión.', true);
+    cargando(true);
+    usarDB(function () { return DB.anotar(r.id, tipoNota, texto); })
+      .then(function () { if (ok) toast(ok); pintar(); })
+      .catch(function (e) { toast(e.message, true); }).then(function () { cargando(false); });
+  }
+
+  /** Bitácora: texto corto para cada anotación. */
+  function textoBitacora(b) {
+    var a = b.accion;
+    if (a === 'Crear') return 'Reserva creada (' + ((b.detalle.split(' · ').pop()) || '').toLowerCase() + ')';
+    if (a === 'Modificar') return 'Datos de la reserva cambiados';
+    if (a === 'Servicios') return 'Servicios y datos guardados';
+    if (a === 'Cancelar') return 'Reserva cancelada';
+    if (a === 'Nota') return '📝 ' + b.detalle;
+    if (a === 'Reparto de habitaciones') return 'Reparto de habitaciones guardado (' + b.detalle + ')';
+    if (a === 'Formulario aplicado') return 'Formulario aplicado a la reserva';
+    if (a === 'Aviso provisional') return 'Aviso de provisional enviado a la casa';
+    return a.replace(/^Formulario: /, 'Formulario: ');
+  }
+
   function pintarDetalle(id) {
     var r = reserva(id);
     if (!r) { vista.innerHTML = botonVolver() + '<div class="vacio">La reserva no existe.</div>'; enlazarVolver(); return; }
     $('#tituloVista').textContent = r.grupo;
-    var cap = capacidadDisponible();
+    var q = ruta().q || {};
     var tel = String(r.telefono || '').replace(/[^\d+]/g, '');
-    var bloq = tipo(r) === 'Bloqueo';
-    vista.innerHTML = botonVolver() +
-      '<div class="tarjeta det ' + clases(r) + '">' + etiquetas(r) +
-      '<h2 style="margin-top:8px">' + esc(r.grupo) + '</h2>' +
+    var bloq = tipo(r) === 'Bloqueo', canc = r.estado === 'Cancelada', aloj = tipo(r) === 'Alojamiento';
+    var pasos = (bloq || canc) ? [] : pasosReserva(r);
+    // Siguiente paso: el primero que se puede hacer ahora (sin contar lo que espera al grupo)
+    var sig = pasos.filter(function (p) { return p.sig && p.e !== 'ok' && !p.espera; })[0];
+    var ICON = { ok: '✓', ahora: '●', aviso: '!', pend: '○' };
+    function lineaPaso(p, i) {
+      var btns = [];
+      if (p.acc) btns.push('<button class="paso-acc" data-p="' + i + '" data-k="acc">' + esc(p.acc.txt) + '</button>');
+      if (p.marca) btns.push('<button class="paso-acc" data-p="' + i + '" data-k="marca">' + esc(p.marca.txt) + '</button>');
+      (p.marcas || []).forEach(function (m, j) { btns.push('<button class="paso-acc" data-p="' + i + '" data-k="m' + j + '">' + esc(m.txt) + '</button>'); });
+      return '<div class="paso-l e-' + p.e + '"><span class="paso-i" aria-hidden="true">' + ICON[p.e] + '</span>' +
+        '<div class="paso-t"><b>' + esc(p.t) + '</b> <span>' + esc(p.txt) + '</span>' + (p.cq ? '<small>' + esc(p.cq) + '</small>' : '') + '</div>' +
+        (btns.length ? '<div class="paso-b' + (btns.length > 1 ? ' dos' : '') + '">' + btns.join('') + '</div>' : '') + '</div>';
+    }
+    var bit = r.bitacora || [], verTodo = S.bitTodo === r.id;
+    var bitHtml = bit.length ? (verTodo ? bit : bit.slice(0, 5)).map(function (b) {
+      return '<li><span class="bit-f">' + esc(marcaLegible(b.fecha)) + '</span><span class="bit-q">' + esc(b.gestor) + '</span><span class="bit-t">' + esc(textoBitacora(b)) + '</span></li>';
+    }).join('') : '<li class="sub">Aún no hay anotaciones.</li>';
+    var datos =
       '<div class="dato"><span>Tipo</span><span>' + esc(tipo(r)) + '</span></div>' +
-      '<div class="dato"><span>' + (bloq ? 'Desde' : 'Entrada') + '</span><span>' + esc(diaSemana(r.entrada)) + ' · ' + esc(r.horaEntrada) + '</span></div>' +
-      '<div class="dato"><span>' + (bloq ? 'Hasta' : 'Salida') + '</span><span>' + esc(diaSemana(r.salida)) + ' · ' + esc(r.horaSalida) + '</span></div>' +
-      (tipo(r) === 'Alojamiento' ? '<div class="dato"><span>Noches</span><span>' + noches(r) + '</span></div>' : '') +
       (!bloq ? '<div class="dato"><span>Responsable</span><span>' + esc(r.responsable || '—') + '</span></div>' +
         '<div class="dato' + (!r.telefono ? ' falta-tel' : '') + '"><span>Teléfono</span><span>' + (tel ? '<a href="tel:' + esc(tel) + '">' + esc(r.telefono) + '</a>' : 'Sin teléfono') + '</span></div>' +
         '<div class="dato' + (!r.email ? ' falta-email' : '') + '"><span>Email</span><span>' + (r.email ? '<a href="mailto:' + esc(r.email) + '">' + esc(r.email) + '</a>' : 'Sin email') + '</span></div>' : '') +
+      (aloj ? '<div class="dato"><span>Personas</span><span>' + (r.personas || 0) + ' · pernoctan ' + pernoctan(r) + '</span></div>' : '') +
       (r.observaciones ? '<div class="dato"><span>Observaciones</span><span>' + esc(r.observaciones) + '</span></div>' : '') +
       (r.estado === 'Provisional' && !bloq ? '<div class="dato"><span>Aviso a 1 mes</span><span>' + (r.avisoEnviado ? 'Enviado el ' + esc(r.avisoEnviado) : 'Pendiente') + '</span></div>' : '') +
-      '</div>' +
-      (tipo(r) === 'Alojamiento' ? '<div class="kpis"><div class="kpi"><b>' + (r.personas || 0) + '</b><span>personas</span></div>' +
-        '<div class="kpi"><b>' + pernoctan(r) + '</b><span>pernoctan</span></div>' +
-        '<div class="kpi"><b>' + (cap ? Math.round(pernoctan(r) * 100 / cap) : 0) + '%</b><span>de ' + cap + ' plazas</span></div></div>' +
-        '<div class="tarjeta"><h2>Habitaciones</h2>' + plano(r.asignaciones) + '</div>' : '') +
-      '<div class="fila-btns">' +
-      (r.estado !== 'Cancelada' ? (tel ? '<a class="btn sec" href="tel:' + esc(tel) + '">Llamar</a>' : '') + '<button class="btn" id="dEditar">Editar</button>' : '') +
-      '</div>' +
-      '<div class="fila-btns" style="margin-top:10px">' +
-      (r.estado !== 'Cancelada' ? '<button class="btn peligro" id="dCancelar">Cancelar reserva</button>' : '') +
-      '<button class="btn peligro borde-p" id="dBorrar">Borrar</button></div>' +
-      '<p class="sub" style="margin-top:16px;font-size:12px">Creada por ' + esc(r.creadoPor || '—') + entreParen(marcaLegible(r.creadoEl)) +
+      '<p class="sub" style="margin:8px 0 0;font-size:12px">Creada por ' + esc(r.creadoPor || '—') + entreParen(marcaLegible(r.creadoEl)) +
       (r.modificadoPor && (marcaLegible(r.modificadoEl) !== marcaLegible(r.creadoEl) || r.modificadoPor !== r.creadoPor)
-        ? ' · Modificada por ' + esc(r.modificadoPor) + entreParen(marcaLegible(r.modificadoEl)) : '') + '</p>';
+        ? ' · Modificada por ' + esc(r.modificadoPor) + entreParen(marcaLegible(r.modificadoEl)) : '') + '</p>' +
+      '<div class="fila-btns" style="margin-top:10px">' + (tel && !canc ? '<a class="btn sec" href="tel:' + esc(tel) + '">Llamar</a>' : '') +
+      (!canc ? '<button class="btn sec" id="dEditar">Editar datos</button>' : '') + '</div>';
+    function apartado(clave, titulo, resumen, cuerpo) {
+      return '<details class="apartado" data-ap="' + clave + '"' + (q.abrir === clave ? ' open' : '') + '><summary><b>' + titulo + '</b><span>' + resumen + '</span></summary><div class="ap-cuerpo">' + cuerpo + '</div></details>';
+    }
+    var fTarjeta = (!bloq && !canc) ? tarjetaFormulario(r).replace(/^<div class="tarjeta"><h2>Formulario del grupo<\/h2>/, '').replace(/<\/div>$/, '') : '';
+    vista.innerHTML = botonVolver() +
+      // Cabecera
+      '<div class="tarjeta exp-cab ' + clases(r) + '"><h2>' + esc(r.grupo) + '</h2>' +
+      '<div class="exp-fechas">' + esc(diaSemana(r.entrada)) + ' ' + esc(r.horaEntrada) + ' → ' + esc(diaSemana(r.salida)) + ' ' + esc(r.horaSalida) +
+      (aloj ? ' · ' + noches(r) + ' noches' : '') + '</div>' + etiquetas(r) + '</div>' +
+      // Evolución
+      (pasos.length ? '<div class="tarjeta exp-pasos"><h2>Evolución</h2>' + pasos.map(lineaPaso).join('') + '</div>' : '') +
+      // Siguiente paso
+      (pasos.length ? '<div class="exp-sig">' + (sig ? '<span>Siguiente paso</span><button class="btn" id="dSig">' + esc(sig.sig) + '</button>'
+        : '<span>' + (pasos.some(function (p) { return p.espera; }) ? 'Esperando respuesta del grupo.' : 'Todo al día.') + '</span>') + '</div>' : '') +
+      // Apartados plegados
+      apartado('datos', 'Datos de la reserva', esc(r.responsable || tipo(r)), datos) +
+      (fTarjeta ? apartado('formulario', 'Formulario del grupo', esc(pasos[1] ? pasos[1].txt : ''), fTarjeta) : '') +
+      (aloj && !canc ? apartado('habitaciones', 'Habitaciones', (r.asignaciones || []).length ? pernoctan(r) + ' pers. en ' + r.asignaciones.length + ' hab.' : 'Sin reparto',
+        avisoReparto(r) + plano(r.asignaciones) + '<div class="fila-btns" style="margin-top:10px"><button class="btn sec" id="dReparto">Reparto de habitaciones</button>' +
+        ((r.asignaciones || []).length ? '<button class="btn sec" id="dHojaHab">Hoja de habitaciones</button>' : '') + '</div>') : '') +
+      (!bloq && !canc ? apartado('estancia', 'Hoja de estancia', '', '<p class="sub" style="margin:0 0 10px">' + resumenServicios(r) + '</p>' +
+        '<div class="fila-btns"><button class="btn sec" id="dServ">Servicios y datos</button><button class="btn sec" id="dHoja">Ver hoja de estancia</button></div>') : '') +
+      // Bitácora
+      '<div class="tarjeta exp-bit"><h2>Bitácora</h2><ul class="bitacora">' + bitHtml + '</ul>' +
+      '<div class="fila-btns" style="margin-top:8px"><button class="btn sec" id="dNota">+ Añadir nota</button>' +
+      (bit.length > 5 ? '<button class="btn borde" id="dBitTodo">' + (verTodo ? 'Ver menos' : 'Ver todo (' + bit.length + ')') + '</button>' : '') + '</div></div>' +
+      // Acciones finales
+      '<details class="apartado peligro-ap"><summary><b>Cancelar o borrar</b><span></span></summary><div class="ap-cuerpo"><div class="fila-btns">' +
+      (!canc ? '<button class="btn peligro" id="dCancelar">Cancelar reserva</button>' : '') +
+      '<button class="btn peligro borde-p" id="dBorrar">Borrar</button></div></div></details>';
     enlazarVolver();
+    // Pasos
+    $$('.paso-acc').forEach(function (b) {
+      b.onclick = function () {
+        var p = pasos[+b.dataset.p], k = b.dataset.k;
+        if (k === 'acc') return p.acc.fn();
+        var m = k === 'marca' ? p.marca : p.marcas[+k.slice(1)];
+        anotar(r, m.tipo, '', 'Anotado en la bitácora');
+      };
+    });
+    if ($('#dSig')) $('#dSig').onclick = function () {
+      if (sig.acc && !sig.sigMarca) return sig.acc.fn();
+      if (sig.sigMarca === '' && sig.acc) return sig.acc.fn();
+      if (sig.sigMarca) return anotar(r, sig.sigMarca, '', 'Anotado');
+      if (sig.marca) return anotar(r, sig.marca.tipo, '', 'Anotado');
+    };
     if ($('#dEditar')) $('#dEditar').onclick = function () { ir('editar/' + encodeURIComponent(r.id)); };
+    if ($('#dServ')) $('#dServ').onclick = function () { ir('servicios/' + encodeURIComponent(r.id)); };
+    if ($('#dHoja')) $('#dHoja').onclick = function () { ir('hoja/' + encodeURIComponent(r.id) + '?modo=presupuesto'); };
+    if (fTarjeta) enlazarFormulario(r);
+    if ($('#dReparto')) $('#dReparto').onclick = function () { ir('reparto/' + encodeURIComponent(r.id)); };
+    if ($('#dHojaHab')) $('#dHojaHab').onclick = function () { ir('habitaciones/' + encodeURIComponent(r.id)); };
+    if ($('#dBitTodo')) $('#dBitTodo').onclick = function () { S.bitTodo = verTodo ? null : r.id; pintarDetalle(r.id); };
+    $('#dNota').onclick = function () {
+      modal('<p><b>Añadir nota a la bitácora</b></p><textarea class="entrada" id="notaTxt" maxlength="300" rows="3" placeholder="Por ejemplo: llamé al responsable; confirmará el número el lunes."></textarea>' +
+        '<div class="fila-btns" style="margin-top:10px"><button class="btn borde" data-r="0">Volver</button><button class="btn" data-r="1">Guardar nota</button></div>', function (e, cerrar) {
+        var b = e.target.closest('[data-r]'); if (!b) return;
+        if (b.dataset.r === '0') return cerrar();
+        var t = $('#notaTxt').value.trim(); if (!t) return toast('Escribe la nota.', true);
+        cerrar(); anotar(r, 'nota', t, 'Nota guardada');
+      });
+      setTimeout(function () { var t = $('#notaTxt'); if (t) t.focus(); }, 50);
+    };
     function accion(nombre, texto, boton, ok) {
       return function () {
         if (S.sinConexion) return toast('Sin conexión: no se puede hacer ahora.', true);
         confirmar(texto, boton, true).then(function (si) {
           if (!si) return;
           cargando(true);
-          api(nombre, { id: r.id }).then(function () { toast(ok); ir('calendario'); })
+          usarDB(function () { return DB[nombre](r.id); }).then(function () { toast(ok); ir('calendario'); })
             .catch(function (e) { toast(e.message, true); }).then(function () { cargando(false); });
         });
       };
     }
     if ($('#dCancelar')) $('#dCancelar').onclick = accion('cancelarReserva', '¿Cancelar la reserva de <b>' + esc(r.grupo) + '</b>? Se quitará del calendario y quedará marcada como cancelada en la lista de reservas.', 'Sí, cancelar', 'Reserva cancelada');
     $('#dBorrar').onclick = accion('borrarReserva', '¿<b>Borrar</b> definitivamente «' + esc(r.grupo) + '»? Desaparecerá de la app, de la lista de reservas y del calendario. <b>No se puede deshacer.</b>' +
-      (r.estado !== 'Cancelada' ? '<br><br>Si solo se ha anulado, mejor usa «Cancelar reserva» para que quede constancia.' : ''), 'Sí, borrar', 'Reserva borrada');
+      (!canc ? '<br><br>Si solo se ha anulado, mejor usa «Cancelar reserva» para que quede constancia.' : ''), 'Sí, borrar', 'Reserva borrada');
   }
 
   // ---------------- Formulario ----------------
@@ -607,10 +875,13 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
     var asig = {}; (f.asignaciones || []).forEach(function (a) { asig[a.habitacion] = a.personas; });
     var habs = habitaciones().slice().sort(function (a, b) { return a.numero - b.numero; });
     var estado = f.estado === 'Confirmada' ? 'Confirmada' : 'Provisional';
+    var porConfirmar = !!(r && q.confirmar && r.estado === 'Provisional');
+    if (porConfirmar) estado = 'Confirmada';
     var tipoSel = TIPOS.indexOf(f.tipo) >= 0 ? f.tipo : 'Alojamiento';
 
     vista.innerHTML = '<div id="fForm">' + botonVolver() +
       (recuperado ? '<div class="aviso-suave">Se ha recuperado lo que estabas escribiendo. <button class="enlace" id="fDescartar">Descartar</button></div>' : '') +
+      (porConfirmar ? '<div class="aviso-suave">Marcada como <b>Confirmada</b>. Completa los datos que falten y pulsa <b>Guardar</b> (si no guardas, sigue provisional).</div>' : '') +
       '<div class="tarjeta"><h2>Tipo</h2><div class="segmento tres" id="fTipo">' +
       TIPOS.map(function (t) { return '<button type="button" data-t="' + t + '">' + (t === 'Bloqueo' ? 'Bloqueo / descanso' : t) + '</button>'; }).join('') + '</div>' +
       '<p class="sub" id="fTipoAyuda" style="margin:8px 0 0"></p></div>' +
@@ -633,7 +904,7 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
       '</div>' +
       '<div class="tarjeta" id="fHabsBloque"><h2>Habitaciones</h2><p class="sub" style="margin-top:-6px">Personas que pernoctan en cada habitación.</p>' +
       '<div class="fila-btns" style="margin-bottom:6px"><button type="button" class="btn sec" id="fAuto">Repartir automáticamente</button><button type="button" class="btn borde" id="fVaciar">Vaciar</button></div>' +
-      '<h3>Fila superior</h3><div class="lista-hab" id="fHabsSup"></div><h3>Fila inferior</h3><div class="lista-hab" id="fHabsInf"></div></div>' +
+      '<div class="lista-hab" id="fHabs"></div></div>' +
       '<div class="form-espacio"></div>' +
       '<div class="pie-form"><div class="total" id="fTotal"></div><button class="btn" id="fGuardar">Guardar</button></div></div>';
 
@@ -677,8 +948,7 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
     function pintaHabs() {
       var oc = ocupadas();
       Object.keys(oc).forEach(function (k) { delete asig[k]; });
-      $('#fHabsSup').innerHTML = habs.filter(function (h) { return /superior/i.test(h.ubicacion); }).map(function (h) { return filaHab(h, oc); }).join('');
-      $('#fHabsInf').innerHTML = habs.filter(function (h) { return !/superior/i.test(h.ubicacion); }).map(function (h) { return filaHab(h, oc); }).join('');
+      $('#fHabs').innerHTML = habs.map(function (h) { return filaHab(h, oc); }).join('');
       pintaTotal();
     }
     function total() { return Object.keys(asig).reduce(function (s, k) { return s + (asig[k] || 0); }, 0); }
@@ -695,7 +965,7 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
       var el = vista.querySelector('.item[data-n="' + n + '"]'); if (el) el.outerHTML = filaHab(h, ocupadas());
       pintaTotal(); guardarBorrador();
     }
-    $('#fHabsSup').onclick = alPulsar; $('#fHabsInf').onclick = alPulsar;
+    $('#fHabs').onclick = alPulsar;
     $('#fVaciar').onclick = function () { asig = {}; pintaHabs(); guardarBorrador(); };
     $('#fAuto').onclick = function () {
       modal('<p><b>Repartir automáticamente</b><br><span class="sub">Rellena las habitaciones libres por orden.</span></p>' +
@@ -824,7 +1094,7 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
       seguir.then(function (ok) {
         if (!ok) return;
         cargando(true);
-        api('guardarReserva', { reserva: d, asignaciones: asignaciones })
+        usarDB(function () { return DB.guardarReserva(d, asignaciones); })
           .then(function (res) {
             lsDel(claveBorrador);
             toast((r ? 'Cambios guardados' : 'Reserva creada') + (res.solapes && res.solapes.length ? ' · coincide con: ' + res.solapes.join(', ') : ''));
@@ -837,6 +1107,778 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
   }
 
   // ---------------- Ajustes ----------------
+  // ---------------- 1.5.0 · Servicios por día y hoja de estancia ----------------
+  var COMIDAS = [['Desayuno', '09:00'], ['Comida', '14:00'], ['Cena', '21:00']];
+  var SALAS = ['Salón', 'Salas', 'Capilla', 'Garaje'];
+  function cfg(clave) { var a = ((S.datos && S.datos.config) || []).filter(function (x) { return x.clave === clave; })[0]; return a ? String(a.valor == null ? '' : a.valor) : ''; }
+  function cfgNum(clave) { var v = cfg(clave).replace(',', '.').trim(); return v === '' || isNaN(+v) ? null : +v; }
+  function euros(n) { return n == null ? 'a consultar' : n.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: 'always' }) + ' €'; }
+  function diasDe(r) { var out = [], d = r.entrada; while (d <= r.salida) { out.push(d); d = sumaDias(d, 1); } return out; }
+  function diaCorto(t) { var d = aFecha(t); return d.toLocaleDateString('es-ES', { weekday: 'short' }).replace('.', '') + ' ' + pad(d.getDate()) + '/' + pad(d.getMonth() + 1); }
+  function mapaServ(r) { var m = {}; (r.servicios || []).forEach(function (x) { m[x.fecha + '|' + x.servicio] = x; }); return m; }
+  function resumenServicios(r) {
+    var sv = r.servicios || [];
+    if (!sv.length) return 'Aún no hay servicios apuntados. Rellénalos para preparar el presupuesto.';
+    var c = { Desayuno: 0, Comida: 0, Cena: 0, Noche: 0 };
+    sv.forEach(function (x) { if (c[x.servicio] != null) c[x.servicio] += (x.adultos || 0) + (x.ninos || 0) + (x.bebes || 0); });
+    return c.Noche + ' pernoctaciones · ' + c.Desayuno + ' desayunos · ' + c.Comida + ' comidas · ' + c.Cena + ' cenas';
+  }
+
+  function pintarServicios(id) {
+    var r = reserva(id);
+    if (!r) { vista.innerHTML = botonVolver() + '<div class="vacio">La reserva no existe.</div>'; enlazarVolver(); return; }
+    var dias = diasDe(r), m = mapaServ(r), g = r.grupoDatos || {};
+    var aloj = tipo(r) === 'Alojamiento';
+    var maxA = 0, maxN = 0, maxB = 0;
+    (r.servicios || []).forEach(function (x) { maxA = Math.max(maxA, x.adultos); maxN = Math.max(maxN, x.ninos); maxB = Math.max(maxB, x.bebes); });
+    if (!(r.servicios || []).length) maxA = r.personas || 0;
+    function num(idc, v, lbl) { return '<label class="sv-num"><span>' + lbl + '</span><input class="entrada" type="number" inputmode="numeric" min="0" max="999" id="' + idc + '" value="' + (v ? v : '') + '" placeholder="0"></label>'; }
+    function filaComida(t, nombre) {
+      var x = m[t + '|' + nombre] || {};
+      return '<div class="sv-fila"><b>' + nombre + '</b>' + num('a_' + t + '_' + nombre, x.adultos, 'Adultos') + num('n_' + t + '_' + nombre, x.ninos, 'Niños') +
+        num('b_' + t + '_' + nombre, x.bebes, '0 a ' + (cfg('edad.gratis_hasta') || 4)) + '</div>';
+    }
+    var bloquesDias = dias.map(function (t, i) {
+      var ultimo = i === dias.length - 1;
+      return '<div class="sv-dia"><h3>' + esc(diaSemana(t)) + '</h3>' +
+        COMIDAS.map(function (c) { return filaComida(t, c[0]); }).join('') +
+        (aloj && !ultimo ? filaComida(t, 'Noche') : '') +
+        '<div class="sv-salas">' + SALAS.map(function (sa) {
+          var on = !!m[t + '|' + sa];
+          return '<label class="chip' + (on ? ' activo' : '') + '"><input type="checkbox" id="s_' + t + '_' + sa + '"' + (on ? ' checked' : '') + '> ' + sa + '</label>';
+        }).join('') + '</div></div>';
+    }).join('');
+    function campo(idc, lbl, v, extra) { return '<label class="campo"><span>' + lbl + '</span><input class="entrada" id="' + idc + '" value="' + esc(v || '') + '"' + (extra || '') + ' autocomplete="off"></label>'; }
+    vista.innerHTML = botonVolver() +
+      '<div class="tarjeta"><h2>' + esc(r.grupo) + '</h2><p class="sub" style="margin:-6px 0 0">' + esc(legible(r.entrada)) + ' ' + esc(r.horaEntrada) + ' → ' + esc(legible(r.salida)) + ' ' + esc(r.horaSalida) + '</p></div>' +
+      '<div class="tarjeta"><h2>Personas</h2>' +
+      '<div class="sv-pers">' + num('pA', maxA, 'Adultos (desde ' + (cfg('edad.adulto_desde') || 9) + ' años)') + num('pN', maxN, 'Niños de ' + ((+cfg('edad.gratis_hasta') || 4) + 1) + ' a ' + ((+cfg('edad.adulto_desde') || 9) - 1)) + num('pB', maxB, 'Niños de 0 a ' + (cfg('edad.gratis_hasta') || 4) + ' (gratis)') + '</div>' +
+      '<button type="button" class="btn sec ancho" id="svAuto" style="margin-top:10px">Rellenar todos los días según el horario</button>' +
+      '<p class="sub" style="margin:8px 0 0;font-size:13px">Pone estas personas en cada comida y noche que cae dentro de la estancia. Después puedes corregir cualquier día.</p></div>' +
+      '<div class="tarjeta"><h2>Servicios por día</h2>' + bloquesDias + '</div>' +
+      '<div class="tarjeta"><h2>Datos para los documentos</h2>' +
+      campo('gEnt', 'Entidad (nombre legal)', g.entidad, ' maxlength="120"') + campo('gCif', 'CIF', g.cif, ' maxlength="30"') +
+      campo('gDir', 'Dirección', g.direccion, ' maxlength="160"') + campo('gRep', 'Representante que firma', g.representante, ' maxlength="120"') +
+      '<div class="dos">' + campo('gDni', 'DNI', g.dni, ' maxlength="30"') + campo('gCar', 'Cargo', g.cargo, ' maxlength="60"') + '</div>' +
+      campo('gSen', 'Señal pagada (€)', g.senal, ' inputmode="decimal" maxlength="12" placeholder="0"') + '</div>' +
+      '<div class="pie-form"><div class="total" id="svTotal"></div><button class="btn" id="svGuardar">Guardar</button></div>';
+    enlazarVolver();
+    function v(idc) { var e = document.getElementById(idc); return e ? Math.max(0, Math.floor(+e.value || 0)) : 0; }
+    function leer() {
+      var out = [];
+      dias.forEach(function (t) {
+        COMIDAS.concat([['Noche']]).forEach(function (c) {
+          var a = v('a_' + t + '_' + c[0]), n = v('n_' + t + '_' + c[0]), b = v('b_' + t + '_' + c[0]);
+          if (a || n || b) out.push({ fecha: t, servicio: c[0], adultos: a, ninos: n, bebes: b });
+        });
+        SALAS.forEach(function (sa) { var e = document.getElementById('s_' + t + '_' + sa); if (e && e.checked) out.push({ fecha: t, servicio: sa, adultos: 1, ninos: 0, bebes: 0 }); });
+      });
+      return out;
+    }
+    function total() {
+      var c = calcularHoja({ servicios: leer(), grupoDatos: {} });
+      $('#svTotal').innerHTML = 'Previsto: <b>' + euros(c.total) + '</b>' + (c.consultar ? ' <small>+ a consultar</small>' : '');
+    }
+    total();
+    vista.oninput = function () { if ($('#svTotal')) total(); };
+    $$('.sv-salas input').forEach(function (e) { e.onchange = function () { e.parentNode.classList.toggle('activo', e.checked); total(); }; });
+    $('#svAuto').onclick = function () {
+      var a = v('pA'), n = v('pN'), b = v('pB');
+      dias.forEach(function (t, i) {
+        COMIDAS.forEach(function (c) {
+          var dentro = (t > r.entrada || c[1] >= r.horaEntrada) && (t < r.salida || c[1] < r.horaSalida);
+          var ea = document.getElementById('a_' + t + '_' + c[0]), en = document.getElementById('n_' + t + '_' + c[0]), eb = document.getElementById('b_' + t + '_' + c[0]);
+          ea.value = dentro && a ? a : ''; en.value = dentro && n ? n : ''; eb.value = dentro && b ? b : '';
+        });
+        var na = document.getElementById('a_' + t + '_Noche'), nn = document.getElementById('n_' + t + '_Noche'), nb = document.getElementById('b_' + t + '_Noche');
+        if (na) { na.value = a || ''; nn.value = n || ''; nb.value = b || ''; }
+      });
+      total(); toast('Rellenado. Revisa los días y pulsa Guardar.');
+    };
+    $('#svGuardar').onclick = function () {
+      if (S.sinConexion) return toast('Sin conexión.', true);
+      var g2 = { entidad: $('#gEnt').value, cif: $('#gCif').value, direccion: $('#gDir').value, representante: $('#gRep').value, dni: $('#gDni').value, cargo: $('#gCar').value, senal: $('#gSen').value };
+      cargando(true);
+      usarDB(function () { return DB.guardarServicios(r.id, leer(), g2); }).then(function () { toast('Servicios guardados'); ir('reserva/' + encodeURIComponent(r.id)); })
+        .catch(function (e) { toast(e.message, true); }).then(function () { cargando(false); });
+    };
+  }
+
+  function calcularHoja(r) {
+    var sv = r.servicios || [], suma = {};
+    sv.forEach(function (x) { var k = x.servicio; suma[k] = suma[k] || { a: 0, n: 0, b: 0, dias: 0 }; suma[k].a += x.adultos; suma[k].n += x.ninos; suma[k].b += (x.bebes || 0); suma[k].dias++; });
+    var lineas = [];
+    function lin(txt, u, precio) { if (u > 0) lineas.push({ txt: txt, u: u, p: precio, imp: precio == null ? null : Math.round(u * precio * 100) / 100 }); }
+    [['Desayuno', 'desayuno', 'Desayuno'], ['Comida', 'comida', 'Comida'], ['Cena', 'cena', 'Cena'], ['Noche', 'noche', 'Alojamiento (noche)']].forEach(function (c) {
+      var x = suma[c[0]] || { a: 0, n: 0 };
+      lin(c[2] + ' · adulto', x.a, cfgNum('precio.adulto.' + c[1]));
+    });
+    [['Desayuno', 'desayuno', 'Desayuno'], ['Comida', 'comida', 'Comida'], ['Cena', 'cena', 'Cena'], ['Noche', 'noche', 'Alojamiento (noche)']].forEach(function (c) {
+      var x = suma[c[0]] || { a: 0, n: 0 };
+      lin(c[2] + ' · niño', x.n, cfgNum('precio.nino.' + c[1]));
+    });
+    [['Desayuno', 'Desayuno'], ['Comida', 'Comida'], ['Cena', 'Cena'], ['Noche', 'Alojamiento (noche)']].forEach(function (c) {
+      var x = suma[c[0]] || { b: 0 };
+      lin(c[1] + ' · 0 a ' + (cfg('edad.gratis_hasta') || 4) + ' años (gratis)', x.b, 0);
+    });
+    [['Salón', 'salon'], ['Salas', 'salas'], ['Capilla', 'capilla'], ['Garaje', 'garaje']].forEach(function (c) {
+      var x = suma[c[0]]; if (x) lin(c[0] + ' (días)', x.dias, cfgNum('precio.' + c[1]));
+    });
+    var total = lineas.reduce(function (t, l) { return t + (l.imp || 0); }, 0);
+    var consultar = lineas.some(function (l) { return l.imp == null; });
+    var senal = +(String((r.grupoDatos || {}).senal || '').replace(',', '.')) || 0;
+    return { lineas: lineas, total: Math.round(total * 100) / 100, consultar: consultar, senal: senal, pendiente: Math.round((total - senal) * 100) / 100 };
+  }
+
+  function htmlHoja(r, modo) {
+    var liq = modo === 'liquidacion', m = mapaServ(r), g = r.grupoDatos || {}, c = calcularHoja(r);
+    var gratis = +cfg('edad.gratis_hasta') || 4, adulto = +cfg('edad.adulto_desde') || 9;
+    var dias = diasDe(r), aloj = tipo(r) === 'Alojamiento';
+    var adMax = 0, niMax = 0, beMax = 0; (r.servicios || []).forEach(function (x) { if (SALAS.indexOf(x.servicio) < 0) { adMax = Math.max(adMax, x.adultos); niMax = Math.max(niMax, x.ninos); beMax = Math.max(beMax, x.bebes || 0); } });
+    function celda(t, sv) { var x = m[t + '|' + sv]; return x && (x.adultos || x.ninos || x.bebes) ? x.adultos + (x.ninos ? ' <small>+ ' + x.ninos + ' niños</small>' : '') + (x.bebes ? ' <small>+ ' + x.bebes + ' de 0-' + gratis + '</small>' : '') : '—'; }
+    var filas = dias.map(function (t) {
+      var salas = SALAS.filter(function (sa) { return m[t + '|' + sa]; }).join(', ');
+      return '<tr><td class="l"><b>' + esc(diaCorto(t)) + '</b></td>' + COMIDAS.map(function (cm) { return '<td>' + celda(t, cm[0]) + '</td>'; }).join('') +
+        (aloj ? '<td>' + celda(t, 'Noche') + '</td>' : '') + '<td class="l">' + (esc(salas) || '—') + '</td></tr>';
+    }).join('');
+    var pie = esc(cfg('texto.pie_pago')).replace('{dias}', esc(cfg('pago.dias_despues') || '5')).replace('{casa}', esc(cfg('casa.nombre'))).replace('{iban}', '<b>' + esc(cfg('casa.iban')) + '</b>');
+    var hoy = legible(hoyTxt());
+    return '<div class="hoja-doc">' +
+      '<div class="hd-cab"><div><div class="hd-casa">' + esc(cfg('casa.nombre') || 'Casa de Espiritualidad María Madre') + '</div>' +
+      '<div class="hd-dir">' + esc(cfg('casa.direccion')) + ' · ' + esc(cfg('casa.cp_ciudad')) + ' · CIF ' + esc(cfg('casa.cif')) + '</div>' +
+      '<div class="hd-dir">' + esc(cfg('casa.telefono')) + ' · ' + esc(cfg('casa.email')) + '</div></div>' +
+      '<div class="hd-tit"><div>Hoja de estancia</div><span class="hd-sello' + (liq ? ' liq' : '') + '">' + (liq ? 'LIQUIDACIÓN' : 'PRESUPUESTO') + '</span><small>Ref. ' + esc(r.id) + ' · ' + hoy + '</small></div></div>' +
+      '<div class="hd-datos">' +
+      '<div><small>GRUPO</small><b>' + esc(r.grupo) + '</b></div>' +
+      '<div><small>RESPONSABLE</small>' + esc(r.responsable || '—') + (r.telefono ? ' · ' + esc(r.telefono) : '') + (r.email ? ' · ' + esc(r.email) : '') + '</div>' +
+      '<div><small>ENTRADA</small>' + esc(diaSemana(r.entrada)) + ', ' + esc(r.horaEntrada) + '</div>' +
+      '<div><small>SALIDA</small>' + esc(diaSemana(r.salida)) + ', ' + esc(r.horaSalida) + '</div>' +
+      '<div><small>PERSONAS</small>' + adMax + ' adultos' + (niMax ? ' · ' + niMax + ' niños (' + (gratis + 1) + ' a ' + (adulto - 1) + ' años)' : '') + (beMax ? ' · ' + beMax + ' de 0 a ' + gratis + ' años' : '') + '</div>' +
+      '<div><small>ENTIDAD Y CIF</small>' + (esc(g.entidad) || '—') + (g.cif ? ' · ' + esc(g.cif) : '') + (g.direccion ? '<br>' + esc(g.direccion) : '') + '</div></div>' +
+      (r.servicios && r.servicios.length ? '' : '<p class="hd-aviso">Todavía no hay servicios apuntados para esta reserva.</p>') +
+      '<h4>Servicios por día</h4><table class="hd-tabla"><tr><th class="l">Día</th>' + COMIDAS.map(function (cm) { return '<th>' + cm[0] + '</th>'; }).join('') + (aloj ? '<th>Noche</th>' : '') + '<th class="l">Salas</th></tr>' + filas + '</table>' +
+      '<h4>Importe</h4><table class="hd-tabla"><tr><th class="l">Concepto</th><th class="r">Unidades</th><th class="r">Precio</th><th class="r">Importe</th></tr>' +
+      c.lineas.map(function (l) { return '<tr><td class="l">' + esc(l.txt) + '</td><td class="r">' + l.u + '</td><td class="r">' + euros(l.p) + '</td><td class="r">' + (l.imp == null ? '—' : euros(l.imp)) + '</td></tr>'; }).join('') +
+      (c.lineas.length ? '' : '<tr><td class="l" colspan="4">—</td></tr>') + '</table>' +
+      '<div class="hd-fin"><div class="hd-cond"><b>Condiciones</b><br>Niños de 0 a ' + gratis + ' años: gratis. De ' + (gratis + 1) + ' a ' + (adulto - 1) + ' años: precio de niño. A partir de ' + adulto + ' años: como adulto.<br>' +
+      (cfgNum('precio.solo_uso') != null ? 'Solo uso de la casa (calefacción, luz, agua…): ' + euros(cfgNum('precio.solo_uso')) + ' por persona.<br>' : '') + esc(cfg('texto.condiciones')) + '</div>' +
+      '<div class="hd-tot"><div><span>Total' + (c.consultar ? '*' : '') + '</span><b>' + euros(c.total) + '</b></div><div><span>Señal pagada</span><span>' + euros(c.senal) + '</span></div>' +
+      '<div class="hd-pend"><b>Pendiente</b><b>' + euros(c.pendiente) + '</b></div>' + (c.consultar ? '<small>* Sin incluir los conceptos «a consultar».</small>' : '') + '</div></div>' +
+      '<div class="hd-pie">' + pie + '<br><span>' + (liq ? 'Cantidades realmente servidas, revisadas por el gestor.' : 'Calculado con los servicios previstos. La liquidación final se hará con lo realmente servido.') + '</span></div>' +
+      '</div>';
+  }
+
+  function pintarHoja(id, modo) {
+    var r = reserva(id);
+    if (!r) { vista.innerHTML = botonVolver() + '<div class="vacio">La reserva no existe.</div>'; enlazarVolver(); return; }
+    modo = modo === 'liquidacion' ? 'liquidacion' : 'presupuesto';
+    vista.innerHTML = botonVolver() +
+      '<div class="hoja-barra"><div class="segmento" id="hModo"><button type="button" data-m="presupuesto"' + (modo === 'presupuesto' ? ' class="activo"' : '') + '>Presupuesto</button><button type="button" data-m="liquidacion"' + (modo === 'liquidacion' ? ' class="activo"' : '') + '>Liquidación</button></div>' +
+      '<div class="fila-btns"><button class="btn sec" id="hServ">Corregir servicios</button><button class="btn sec" id="hXls">Descargar Excel</button><button class="btn" id="hPdf">Imprimir / PDF</button></div></div>' +
+      '<div class="hoja-marco">' + htmlHoja(r, modo) + '</div>';
+    enlazarVolver();
+    $('#hModo').onclick = function (e) { var b = e.target.closest('button'); if (b) ir('hoja/' + encodeURIComponent(r.id) + '?modo=' + b.dataset.m); };
+    $('#hServ').onclick = function () { ir('servicios/' + encodeURIComponent(r.id)); };
+    $('#hXls').onclick = function () {
+      cargando(true);
+      excelHoja(r, modo).then(function () { toast('Excel descargado'); })
+        .catch(function (e) { toast(e.message || 'No se pudo crear el Excel.', true); }).then(function () { cargando(false); });
+    };
+    $('#hPdf').onclick = function () {
+      var t = document.title; document.title = (modo === 'liquidacion' ? 'Liquidación' : 'Presupuesto') + ' · ' + r.grupo;
+      document.body.classList.add('imprimiendo-hoja'); window.print();
+      setTimeout(function () { document.body.classList.remove('imprimiendo-hoja'); document.title = t; }, 800);
+    };
+  }
+
+  // ---------------- 1.5.2 · Hoja de estancia en Excel ----------------
+  var EXCEL_URL = 'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';
+  var excelCarga = null;
+  function cargarExcelJS() {
+    if (window.ExcelJS) return Promise.resolve(window.ExcelJS);
+    if (excelCarga) return excelCarga;
+    excelCarga = new Promise(function (ok, mal) {
+      var s = document.createElement('script'); s.src = EXCEL_URL; s.integrity = 'sha384-Pqp51FUN2/qzfxZxBCtF0stpc9ONI6MYZpVqmo8m20SoaQCzf+arZvACkLkirlPz'; s.crossOrigin = 'anonymous';
+      s.onload = function () { window.ExcelJS ? ok(window.ExcelJS) : mal(new Error('No se pudo preparar el Excel.')); };
+      s.onerror = function () { excelCarga = null; mal(new Error('No se pudo descargar el programa de Excel. Comprueba la conexión.')); };
+      document.head.appendChild(s);
+    });
+    return excelCarga;
+  }
+  function nombreArchivo(t) { return String(t).replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80); }
+
+  function excelHoja(r, modo) {
+    return cargarExcelJS().then(function (ExcelJS) {
+      var liq = modo === 'liquidacion', m = mapaServ(r), g = r.grupoDatos || {}, c = calcularHoja(r);
+      var gratis = +cfg('edad.gratis_hasta') || 4, adulto = +cfg('edad.adulto_desde') || 9;
+      var dias = diasDe(r), aloj = tipo(r) === 'Alojamiento';
+      var GRANATE = 'FF85200C', LINEA = 'FFDDD5CC', SUAVE = 'FFF7F1EA';
+      var EUR = '#,##0.00 "€"';
+      var wb = new ExcelJS.Workbook(); wb.creator = 'App Casa María Madre'; wb.created = new Date();
+      var ws = wb.addWorksheet(liq ? 'Liquidación' : 'Presupuesto', {
+        pageSetup: { paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.5, right: 0.5, top: 0.6, bottom: 0.6, header: 0.3, footer: 0.3 } },
+        views: [{ showGridLines: false }]
+      });
+      // Columnas: Día + (adultos, niños, 0 a 4) por servicio + Salas
+      var serv = COMIDAS.map(function (x) { return x[0]; }); if (aloj) serv.push('Noche');
+      var K = 3, nCol = 2 + serv.length * K; // A = día, luego grupos de 3, última = salas
+      var anchos = [16]; serv.forEach(function () { anchos.push(8, 8, 7); }); anchos.push(22); anchos[nCol - 2] = Math.max(anchos[nCol - 2], 12); anchos[nCol - 3] = Math.max(anchos[nCol - 3], 10);
+      ws.columns = anchos.map(function (w) { return { width: w }; });
+      function L(n) { var s = ''; n++; while (n > 0) { var k = (n - 1) % 26; s = String.fromCharCode(65 + k) + s; n = Math.floor((n - 1) / 26); } return s; } // 0 → A
+      var UL = L(nCol - 1);
+      var fila = 1;
+      function unir(f, a, b) { ws.mergeCells(L(a) + f + ':' + L(b) + f); }
+      function borde(cel, grueso) { cel.border = { bottom: { style: grueso ? 'medium' : 'thin', color: { argb: grueso ? GRANATE : LINEA } } }; }
+      // Cabecera
+      var cel = ws.getCell('A1'); cel.value = cfg('casa.nombre') || 'Casa de Espiritualidad María Madre';
+      cel.font = { name: 'Georgia', size: 15, bold: true, color: { argb: GRANATE } }; unir(1, 0, nCol - 4);
+      cel = ws.getCell(L(nCol - 3) + '1'); cel.value = 'HOJA DE ESTANCIA'; cel.font = { name: 'Georgia', size: 13, bold: true }; cel.alignment = { horizontal: 'right' }; unir(1, nCol - 3, nCol - 1);
+      cel = ws.getCell('A2'); cel.value = [cfg('casa.direccion'), cfg('casa.cp_ciudad'), cfg('casa.cif') ? 'CIF ' + cfg('casa.cif') : ''].filter(Boolean).join(' · '); cel.font = { size: 9 }; unir(2, 0, nCol - 4);
+      cel = ws.getCell(L(nCol - 3) + '2'); cel.value = liq ? 'LIQUIDACIÓN' : 'PRESUPUESTO';
+      cel.font = { bold: true, color: { argb: 'FFFFFFFF' } }; cel.alignment = { horizontal: 'center' };
+      cel.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: liq ? 'FF1F5F3A' : GRANATE } }; unir(2, nCol - 3, nCol - 1);
+      cel = ws.getCell('A3'); cel.value = [cfg('casa.telefono'), cfg('casa.email')].filter(Boolean).join(' · '); cel.font = { size: 9 }; unir(3, 0, nCol - 4);
+      cel = ws.getCell(L(nCol - 3) + '3'); cel.value = 'Ref. ' + r.id + ' · ' + legible(hoyTxt()); cel.font = { size: 9, color: { argb: 'FF555555' } }; cel.alignment = { horizontal: 'right' }; unir(3, nCol - 3, nCol - 1);
+      for (var k = 0; k < nCol; k++) borde(ws.getCell(L(k) + '3'), true);
+      fila = 5;
+      // Datos del grupo
+      var adMax = 0, niMax = 0, beMax = 0; (r.servicios || []).forEach(function (x) { if (SALAS.indexOf(x.servicio) < 0) { adMax = Math.max(adMax, x.adultos); niMax = Math.max(niMax, x.ninos); beMax = Math.max(beMax, x.bebes || 0); } });
+      [['Grupo', r.grupo],
+       ['Responsable', [r.responsable, r.telefono, r.email].filter(Boolean).join(' · ') || '—'],
+       ['Entrada', diaSemana(r.entrada) + ', ' + r.horaEntrada],
+       ['Salida', diaSemana(r.salida) + ', ' + r.horaSalida],
+       ['Personas', adMax + ' adultos' + (niMax ? ' · ' + niMax + ' niños (' + (gratis + 1) + ' a ' + (adulto - 1) + ' años)' : '') + (beMax ? ' · ' + beMax + ' de 0 a ' + gratis + ' años' : '')],
+       ['Entidad y CIF', [g.entidad, g.cif].filter(Boolean).join(' · ') || '—'],
+       ['Dirección', g.direccion || '—']
+      ].forEach(function (d) {
+        var a = ws.getCell('A' + fila); a.value = d[0].toUpperCase(); a.font = { size: 8.5, color: { argb: 'FF666666' } };
+        var b = ws.getCell('B' + fila); b.value = d[1]; b.font = d[0] === 'Grupo' ? { bold: true } : {}; unir(fila, 1, nCol - 1);
+        fila++;
+      });
+      fila++;
+      function titulo(t) { var x = ws.getCell('A' + fila); x.value = t; x.font = { name: 'Georgia', size: 12, bold: true, color: { argb: GRANATE } }; fila++; }
+      // Servicios por día (números editables)
+      titulo('Servicios por día');
+      var f1 = fila, f2 = fila + 1;
+      ws.getCell('A' + f1).value = 'Día'; ws.mergeCells('A' + f1 + ':A' + f2);
+      serv.forEach(function (s, i) { var col = 1 + i * K; ws.getCell(L(col) + f1).value = s; unir(f1, col, col + K - 1); ws.getCell(L(col) + f2).value = 'Adultos'; ws.getCell(L(col + 1) + f2).value = 'Niños'; ws.getCell(L(col + 2) + f2).value = '0-' + gratis; });
+      ws.getCell(UL + f1).value = 'Salas'; ws.mergeCells(UL + f1 + ':' + UL + f2);
+      [f1, f2].forEach(function (f) { for (var k = 0; k < nCol; k++) { var x = ws.getCell(L(k) + f); x.font = { bold: true, size: f === f1 ? 9.5 : 8.5, color: { argb: 'FF444444' } }; x.alignment = { horizontal: k === 0 || k === nCol - 1 ? 'left' : 'center', vertical: 'middle' }; x.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: SUAVE } }; } });
+      for (k = 0; k < nCol; k++) borde(ws.getCell(L(k) + f2), true);
+      fila = f2 + 1;
+      var fIni = fila;
+      dias.forEach(function (t, di) {
+        ws.getCell('A' + fila).value = diaCorto(t); ws.getCell('A' + fila).font = { bold: true };
+        serv.forEach(function (s, i) {
+          var x = m[t + '|' + s] || {}, col = 1 + i * K;
+          var ca = ws.getCell(L(col) + fila), cn = ws.getCell(L(col + 1) + fila), cb = ws.getCell(L(col + 2) + fila);
+          ca.value = x.adultos || null; cn.value = x.ninos || null; cb.value = x.bebes || null;
+          ca.alignment = cn.alignment = cb.alignment = { horizontal: 'center' };
+        });
+        ws.getCell(UL + fila).value = SALAS.filter(function (sa) { return m[t + '|' + sa]; }).join(', ') || null;
+        for (var k = 0; k < nCol; k++) borde(ws.getCell(L(k) + fila));
+        fila++;
+      });
+      var fFin = fila - 1;
+      fila++;
+      // Importe (fórmulas)
+      titulo('Importe');
+      var cC = 'A', cU = L(nCol - 3), cP = L(nCol - 2), cI = UL;
+      ws.getCell(cC + fila).value = 'Concepto'; unir(fila, 0, nCol - 4);
+      ws.getCell(cU + fila).value = 'Unidades'; ws.getCell(cP + fila).value = 'Precio'; ws.getCell(cI + fila).value = 'Importe';
+      [cC, cU, cP, cI].forEach(function (cl) { var x = ws.getCell(cl + fila); x.font = { bold: true, size: 9.5, color: { argb: 'FF444444' } }; x.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: SUAVE } }; x.alignment = { horizontal: cl === cC ? 'left' : 'right' }; });
+      for (k = 0; k < nCol; k++) borde(ws.getCell(L(k) + fila), true);
+      fila++;
+      var fImpIni = fila, rango = function (col) { return col + fIni + ':' + col + fFin; };
+      var porServ = {}; (r.servicios || []).forEach(function (x) { var q = porServ[x.servicio] = porServ[x.servicio] || { a: 0, n: 0, b: 0, d: 0 }; q.a += x.adultos; q.n += x.ninos; q.b += (x.bebes || 0); q.d++; });
+      var conceptos = [];
+      [['Desayuno', 'desayuno', 'Desayuno'], ['Comida', 'comida', 'Comida'], ['Cena', 'cena', 'Cena'], ['Noche', 'noche', 'Alojamiento (noche)']].forEach(function (cx) {
+        var i = serv.indexOf(cx[0]); if (i < 0) return; var q = porServ[cx[0]] || { a: 0, n: 0, b: 0 };
+        conceptos.push({ txt: cx[2] + ' · adulto', f: 'SUM(' + rango(L(1 + i * K)) + ')', u: q.a, p: cfgNum('precio.adulto.' + cx[1]) });
+        conceptos.push({ txt: cx[2] + ' · niño', f: 'SUM(' + rango(L(2 + i * K)) + ')', u: q.n, p: cfgNum('precio.nino.' + cx[1]) });
+      });
+      [['Desayuno', 'Desayuno'], ['Comida', 'Comida'], ['Cena', 'Cena'], ['Noche', 'Alojamiento (noche)']].forEach(function (cx) {
+        var i = serv.indexOf(cx[0]); if (i < 0) return; var q = porServ[cx[0]] || { b: 0 };
+        if (q.b) conceptos.push({ txt: cx[1] + ' · 0 a ' + gratis + ' años (gratis)', f: 'SUM(' + rango(L(3 + i * K)) + ')', u: q.b, p: 0 });
+      });
+      [['Salón', 'salon'], ['Salas', 'salas'], ['Capilla', 'capilla'], ['Garaje', 'garaje']].forEach(function (cx) {
+        var q = porServ[cx[0]] || { d: 0 };
+        conceptos.push({ txt: cx[0] + ' (días)', f: 'COUNTIF(' + rango(UL) + ',"*' + cx[0] + '*")', u: q.d, p: cfgNum('precio.' + cx[1]) });
+      });
+      conceptos.forEach(function (cx) {
+        ws.getCell(cC + fila).value = cx.txt; unir(fila, 0, nCol - 4);
+        var u = ws.getCell(cU + fila); u.value = { formula: cx.f, result: cx.u }; u.alignment = { horizontal: 'right' };
+        var p = ws.getCell(cP + fila); p.value = cx.p; p.numFmt = EUR;
+        if (cx.p == null) { p.value = 'a consultar'; p.alignment = { horizontal: 'right' }; p.font = { italic: true, color: { argb: 'FF777777' } }; }
+        var im = ws.getCell(cI + fila);
+        im.value = { formula: 'IF(ISNUMBER(' + cP + fila + '),' + cU + fila + '*' + cP + fila + ',"—")', result: cx.p == null ? '—' : Math.round(cx.u * cx.p * 100) / 100 }; im.alignment = { horizontal: 'right' };
+        im.numFmt = EUR;
+        for (var k = 0; k < nCol; k++) borde(ws.getCell(L(k) + fila));
+        fila++;
+      });
+      var fImpFin = fila - 1;
+      fila++;
+      function tot(txt, val, negrita, color) {
+        var a = ws.getCell(cP + fila); a.value = txt; a.alignment = { horizontal: 'right' }; a.font = { bold: !!negrita, color: color ? { argb: color } : undefined };
+        var b = ws.getCell(cI + fila); b.value = val; b.numFmt = EUR; b.font = { bold: !!negrita, color: color ? { argb: color } : undefined };
+        return fila++;
+      }
+      var fT = tot('Total' + (c.consultar ? '*' : ''), { formula: 'SUM(' + cI + fImpIni + ':' + cI + fImpFin + ')', result: c.total }, true);
+      var fS = tot('Señal pagada', c.senal);
+      var fP = tot('Pendiente', { formula: cI + fT + '-' + cI + fS, result: c.pendiente }, true, GRANATE);
+      ws.getCell(cP + fP).border = ws.getCell(cI + fP).border = { top: { style: 'thin', color: { argb: GRANATE } } };
+      if (c.consultar) { ws.getCell(cP + fila).value = '* Sin incluir los conceptos «a consultar».'; ws.getCell(cP + fila).font = { size: 8.5, color: { argb: 'FF666666' } }; ws.getCell(cP + fila).alignment = { horizontal: 'right' }; fila++; }
+      fila++;
+      // Condiciones y pie
+      function parrafo(txt, alto, fuente) {
+        var x = ws.getCell('A' + fila); x.value = txt; x.alignment = { wrapText: true, vertical: 'top' }; x.font = fuente || { size: 9 };
+        unir(fila, 0, nCol - 1); ws.getRow(fila).height = alto; fila++;
+      }
+      titulo('Condiciones');
+      var cond = 'Niños de 0 a ' + gratis + ' años: gratis. De ' + (gratis + 1) + ' a ' + (adulto - 1) + ' años: precio de niño. A partir de ' + adulto + ' años: como adulto.';
+      if (cfgNum('precio.solo_uso') != null) cond += '\nSolo uso de la casa (calefacción, luz, agua…): ' + euros(cfgNum('precio.solo_uso')) + ' por persona.';
+      if (cfg('texto.condiciones')) cond += '\n' + cfg('texto.condiciones');
+      parrafo(cond, 14 * Math.max(2, cond.split('\n').length + Math.floor(cond.length / 110)));
+      var pie = cfg('texto.pie_pago').replace('{dias}', cfg('pago.dias_despues') || '5').replace('{casa}', cfg('casa.nombre')).replace('{iban}', cfg('casa.iban'));
+      if (pie) parrafo(pie, 14 * Math.max(2, 1 + Math.floor(pie.length / 110)));
+      parrafo(liq ? 'Cantidades realmente servidas, revisadas por el gestor.' : 'Calculado con los servicios previstos. La liquidación final se hará con lo realmente servido. Si cambias cantidades en «Servicios por día», el importe se recalcula solo.', 26, { size: 8.5, italic: true, color: { argb: 'FF555555' } });
+      ws.pageSetup.printArea = 'A1:' + UL + (fila - 1);
+      return wb.xlsx.writeBuffer().then(function (buf) {
+        var nombre = nombreArchivo((liq ? 'Liquidación' : 'Presupuesto') + ' - ' + r.grupo + ' - ' + legible(r.entrada).replace(/\//g, '-')) + '.xlsx';
+        var blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = nombre;
+        document.body.appendChild(a); a.click();
+        setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+        return nombre;
+      });
+    });
+  }
+
+  // ---------------- 1.7.0 · Formulario del grupo (lado del gestor) ----------------
+  function marcaCorta(m) { return m ? legible(String(m).slice(0, 10)) + (String(m).length > 10 ? ' ' + String(m).slice(11, 16) : '') : ''; }
+  function tarjetaFormulario(r) {
+    var f = r.formulario, e = f ? f.estado : '', fuera = hoyTxt() > r.entrada;
+    var txt = fuera ? (f && f.datos ? 'Plazo terminado (el día de entrada). Recibido el ' + marcaCorta(f.enviadoEl) + (e === 'Aplicado' ? ', aplicado a la reserva.' : '.') : 'Plazo terminado (el día de entrada): el enlace ya no se puede usar.') :
+      !f ? 'Aún no se ha enviado el enlace al grupo.' :
+      e === 'Pendiente' ? 'Enlace creado. Esperando a que el grupo lo rellene' + (f.enviadoEl ? ' (último envío: ' + marcaCorta(f.enviadoEl) + ')' : '') + '.' :
+      e === 'Recibido' ? '<b>Recibido el ' + marcaCorta(f.enviadoEl) + '.</b> Pendiente de revisar y aplicar.' :
+      e === 'Aplicado' ? 'Aplicado a la reserva (recibido el ' + marcaCorta(f.enviadoEl) + ').' :
+      e === 'Cerrado' ? 'Cerrado: el grupo ya no puede usarlo.' : esc(e);
+    var b = [];
+    if (e === 'Recibido') b.push('<button class="btn" id="fRevisar">Revisar y aplicar</button>');
+    else if (f && f.datos) b.push('<button class="btn sec" id="fRevisar">Ver lo recibido</button>');
+    if (e !== 'Cerrado' && !fuera) b.push('<button class="btn sec" id="fEnviar">' + (f ? 'Enviar el enlace otra vez' : 'Enviar enlace al grupo') + '</button>');
+    return '<div class="tarjeta"><h2>Formulario del grupo</h2><p class="sub" style="margin:-4px 0 10px">' + txt + '</p>' +
+      '<div class="fila-btns">' + b.join('') + '</div>' +
+      (f && !fuera ? '<p class="sub" style="margin:10px 0 0;font-size:13px"><button class="enlace" id="fAbrir">' + (e === 'Cerrado' ? 'Volver a abrir el formulario' : 'Cerrar el formulario') + '</button></p>' : '') + '</div>';
+  }
+  function enlazarFormulario(r) {
+    if ($('#fRevisar')) $('#fRevisar').onclick = function () { ir('formulario/' + encodeURIComponent(r.id)); };
+    if ($('#fEnviar')) $('#fEnviar').onclick = function () {
+      if (S.sinConexion) return toast('Sin conexión.', true);
+      cargando(true);
+      usarDB(function () { return DB.prepararFormulario(r.id); })
+        .then(function (d) { cargando(false); compartirEnlace(reserva(r.id) || r, d.enlace); })
+        .catch(function (e) { cargando(false); toast(e.message, true); });
+    };
+    if ($('#fAbrir')) $('#fAbrir').onclick = function () {
+      var abrir = r.formulario.estado === 'Cerrado';
+      confirmar(abrir ? 'El grupo podrá volver a usar su enlace (hasta el día de entrada).' : 'El grupo ya no podrá usar su enlace. Podrás volver a abrirlo cuando quieras.', abrir ? 'Abrir' : 'Cerrar').then(function (ok) {
+        if (!ok) return;
+        cargando(true);
+        usarDB(function () { return DB.abrirFormulario(r.id, abrir); }).then(function () { toast(abrir ? 'Formulario abierto' : 'Formulario cerrado'); pintar(); })
+          .catch(function (e) { toast(e.message, true); }).then(function () { cargando(false); });
+      });
+    };
+  }
+  function compartirEnlace(r, enlace, cual) {
+    var contrato = cual === 'contrato';
+    // Cada forma de envío queda en la bitácora (sin esperar ni mostrar el reloj).
+    var apuntado = {};
+    function apuntar(t) {
+      if (contrato) t = 'contrato_enviado';
+      if (apuntado[t] || S.sinConexion) return; apuntado[t] = 1; usarDB(function () { return DB.anotar(r.id, t); }).catch(function () {});
+    }
+    var texto = contrato
+      ? 'Hola. Os enviamos el contrato de vuestra estancia en la Casa de Espiritualidad María Madre (' + legible(r.entrada) + ' a ' + legible(r.salida) + '). Podéis leerlo y firmarlo desde el móvil en este enlace:'
+      : 'Hola. Para preparar vuestra estancia en la Casa de Espiritualidad María Madre (' + legible(r.entrada) + ' a ' + legible(r.salida) +
+      '), por favor rellenad este formulario. Podéis corregirlo con el mismo enlace hasta el día de entrada:';
+    modal('<p style="margin-bottom:6px"><b>' + (contrato ? 'Enlace para firmar el contrato' : 'Enlace del formulario') + '</b></p><p class="sub" style="margin:0 0 10px">Envíalo al responsable del grupo. Solo sirve para esta reserva.</p>' +
+      '<input class="entrada" id="feEnlace" readonly value="' + esc(enlace) + '" style="font-size:14px">' +
+      '<div class="fila-btns" style="margin-top:10px">' + (navigator.share ? '<button class="btn" data-r="share">Compartir…</button>' : '') +
+      '<button class="btn sec" data-r="copiar">Copiar</button></div>' +
+      '<div class="fila-btns" style="margin-top:8px"><a class="btn sec" data-log="enlace_whatsapp" target="_blank" rel="noopener" href="https://wa.me/?text=' + encodeURIComponent(texto + ' ' + enlace) + '">WhatsApp</a>' +
+      '<a class="btn sec" data-log="enlace_correo" href="mailto:' + esc(r.email || '') + '?subject=' + encodeURIComponent((contrato ? 'Contrato' : 'Formulario') + ' de su estancia · Casa María Madre') + '&body=' + encodeURIComponent(texto + '\n\n' + enlace) + '">Correo</a></div>' +
+      '<div class="fila-btns" style="margin-top:8px"><button class="btn borde" data-r="0">Cerrar</button></div>',
+      function (e, cerrar) {
+        var lg = e.target.closest('[data-log]'); if (lg) apuntar(lg.dataset.log);
+        var b = e.target.closest('[data-r]'); if (!b) return;
+        if (b.dataset.r === '0') { cerrar(); pintar(); return; }
+        if (b.dataset.r === 'share') { navigator.share({ title: (contrato ? 'Contrato' : 'Formulario') + ' · Casa María Madre', text: texto, url: enlace }).then(function () { apuntar('enlace_compartido'); }).catch(function () {}); return; }
+        if (b.dataset.r === 'copiar') {
+          var i = $('#feEnlace'); i.select(); i.setSelectionRange(0, 9999);
+          apuntar('enlace_copiado');
+          (navigator.clipboard && navigator.clipboard.writeText ? navigator.clipboard.writeText(enlace) : Promise.reject()).then(function () { toast('Enlace copiado'); })
+            .catch(function () { try { document.execCommand('copy'); toast('Enlace copiado'); } catch (x) { toast('Mantén pulsado el enlace para copiarlo.', true); } });
+        }
+      });
+  }
+
+  function pintarFormularioRecibido(id) {
+    var r = reserva(id);
+    if (!r || !r.formulario || !r.formulario.datos) { vista.innerHTML = botonVolver() + '<div class="vacio">No hay ningún formulario recibido para esta reserva.</div>'; enlazarVolver(); return; }
+    var f = r.formulario, d = f.datos, p = d.personas || {}, g = d.grupo || {}, c = d.contacto || {}, h = d.habitaciones || {}, gd = r.grupoDatos || {};
+    var cambios = [];
+    function fila(et, nuevo, actual, nombre) {
+      var cambia = actual != null && String(nuevo || '') !== String(actual || '') && String(nuevo || '') !== '';
+      if (cambia) cambios.push(nombre || et.toLowerCase());
+      return '<div class="dato"><span>' + et + '</span><span>' + (esc(nuevo) || '—') + (cambia ? '<br><small class="sub cambio">En la reserva pone ' + (esc(actual) || '—') + ' · se cambiará al aplicar</small>' : '') + '</span></div>';
+    }
+    var pers = (p.adultos || 0) + (p.ninos || 0) + (p.bebes || 0);
+    var porSv = {}; (d.servicios || []).forEach(function (x) { (porSv[x.fecha] = porSv[x.fecha] || []).push(x.servicio + ' ' + x.total); });
+    var salas = {}; (d.salas || []).forEach(function (x) { (salas[x.fecha] = salas[x.fecha] || []).push(x.sala); });
+    var dias = Object.keys(porSv).concat(Object.keys(salas)).filter(function (x, i, a) { return a.indexOf(x) === i; }).sort();
+    var gratis = cfg('edad.gratis_hasta') || 4, adulto = cfg('edad.adulto_desde') || 9;
+    vista.innerHTML = botonVolver() +
+      '<div class="tarjeta"><h2>' + esc(r.grupo) + '</h2><p class="sub" style="margin:-6px 0 0">Recibido el ' + marcaCorta(f.enviadoEl) + ' · estado: <b>' + esc(f.estado) + '</b></p>%%RESUMEN%%</div>' +
+      '<div class="tarjeta"><h2>Personas</h2>' +
+      fila('Adultos (desde ' + adulto + ')', p.adultos) + fila('Niños de ' + (+gratis + 1) + ' a ' + (adulto - 1), p.ninos) + fila('Niños de 0 a ' + gratis, p.bebes) +
+      fila('Total en la reserva', pers, r.personas, 'personas') + '</div>' +
+      '<div class="tarjeta"><h2>Contacto y datos para documentos</h2>' +
+      fila('Teléfono', c.telefono, r.telefono, 'teléfono') + fila('Correo', c.email, r.email, 'correo') +
+      fila('Entidad', g.entidad, gd.entidad || '') + fila('CIF', g.cif, gd.cif || '', 'CIF') + fila('Dirección', g.direccion, gd.direccion || '') +
+      fila('Representante', g.representante, gd.representante || '') + fila('DNI', g.dni, gd.dni || '', 'DNI') + fila('Cargo', g.cargo, gd.cargo || '') + '</div>' +
+      '<div class="tarjeta"><h2>Servicios y salas</h2><p class="sub" style="margin:-4px 0 8px;font-size:13px">Total de personas en cada servicio (incluidos los de 0 a ' + gratis + '). Al aplicar se reparte: primero los de 0 a ' + gratis + ', luego los niños y el resto, adultos.</p>' + (dias.length ? dias.map(function (t) {
+        return '<div class="dato"><span>' + esc(diaCorto(t)) + '</span><span>' + esc((porSv[t] || []).join(' · ')) + (salas[t] ? '<br><small class="sub">' + esc(salas[t].join(', ')) + '</small>' : '') + '</span></div>';
+      }).join('') : '<p class="sub">Sin servicios.</p>') +
+      (r.servicios && r.servicios.length ? '<p class="sub" style="margin:8px 0 0;font-size:13px">Al aplicar se sustituyen los servicios que tiene ahora la reserva.</p>' : '') + '</div>' +
+      (tipo(r) === 'Alojamiento' ? '<div class="tarjeta"><h2>Habitaciones (preferencias)</h2>' +
+        fila('Matrimonios', h.matrimonios) + fila('Comparten', h.comparten) + fila('Individuales', h.individual) + fila('Jóvenes en literas', h.literas) +
+        (h.movilidad ? fila('Movilidad reducida (se reparte como «comparten»)', h.movilidad) : '') + (h.observaciones ? fila('Observaciones', h.observaciones) : '') +
+        '<p class="sub" style="margin:8px 0 0;font-size:13px">Se guardan para el reparto de habitaciones (no cambian las habitaciones asignadas).</p></div>' : '') +
+      '<div class="tarjeta"><h2>Alergias</h2>' + ((d.alergias || []).length ? d.alergias.map(function (a) {
+        return '<div class="dato"><span>Persona ' + esc(a.persona) + '</span><span>' + esc(a.alergenos.concat(a.otras ? [a.otras] : []).join(', ')) + '</span></div>';
+      }).join('') : '<p class="sub">Ninguna.</p>') + '</div>' +
+      '<div class="tarjeta"><h2>Protección de datos</h2>' +
+      '<div class="dato"><span>Tratamiento de datos</span><span>' + (d.consentimientos && d.consentimientos.datos ? 'Sí' : 'No') + '</span></div>' +
+      '<div class="dato"><span>Imágenes</span><span>' + (d.consentimientos && d.consentimientos.imagenes ? 'Sí' : 'No') + '</span></div>' +
+      '<div class="dato"><span>Actúa en nombre del grupo</span><span>' + (d.consentimientos && d.consentimientos.autorizacion ? 'Sí' : 'No') + '</span></div>' +
+      (d.consentimientos && d.consentimientos.textos ? '<details class="txt-acep"><summary>Ver los textos que aceptó</summary>' +
+        ['datos', 'imagenes', 'autorizacion'].map(function (k) { var t = d.consentimientos.textos[k]; return t ? '<p>' + esc(t).replace(/\n/g, '<br>') + '</p>' : ''; }).join('') + '</details>' : '') + '</div>' +
+      '<div class="form-espacio"></div><div class="pie-form"><div class="total">' + (f.estado === 'Aplicado' ? 'Ya aplicado' : 'Pendiente de aplicar') + '</div>' +
+      '<button class="btn" id="frAplicar">' + (f.estado === 'Aplicado' ? 'Aplicar de nuevo' : 'Aplicar a la reserva') + '</button></div>';
+    vista.innerHTML = vista.innerHTML.replace('%%RESUMEN%%', cambios.length ?
+      '<p class="cambios-res">Al aplicar cambiarán ' + cambios.length + ' dato' + (cambios.length === 1 ? '' : 's') + ': ' + esc(cambios.join(', ')) + '.</p>' :
+      '<p class="sub" style="margin:8px 0 0;font-size:13px">Los datos de contacto y personas coinciden con la reserva.</p>');
+    enlazarVolver();
+    $('#frAplicar').onclick = function () {
+      if (S.sinConexion) return toast('Sin conexión.', true);
+      confirmar('Se pasarán a la reserva el teléfono, el correo, el número de personas, los datos para documentos, los servicios por día, las salas y las alergias. Después podrás corregir lo que quieras.', 'Aplicar').then(function (ok) {
+        if (!ok) return;
+        cargando(true);
+        usarDB(function () { return DB.aplicarFormulario(r.id); }).then(function () { toast('Formulario aplicado a la reserva'); ir('reserva/' + encodeURIComponent(r.id)); })
+          .catch(function (e) { toast(e.message, true); }).then(function () { cargando(false); });
+      });
+    };
+  }
+
+  // ---------------- 1.8.0 · Reparto de habitaciones ----------------
+  var USOS = ['Matrimonio', 'Compartida', 'Individual', 'Jóvenes', 'Otro'];
+  function esLiteras(h) { return /litera/i.test(h.camas || '') || /cu[aá]druple|qu[ií]ntuple/i.test(h.tipo || ''); }
+  /** Lo que pidió el grupo en su formulario (personas por tipo de uso), o null. */
+  function pideGrupo(r) {
+    var d = r.formulario && r.formulario.datos, h = d && d.habitaciones;
+    if (!h || !(h.matrimonios || h.comparten || h.individual || h.literas || h.movilidad)) return null;
+    return { Matrimonio: (h.matrimonios || 0) * 2, Compartida: (h.comparten || 0) + (h.movilidad || 0), Individual: h.individual || 0, 'Jóvenes': h.literas || 0 };
+  }
+  /** Habitaciones ocupadas por otras reservas en las fechas de r: { nº: grupo } */
+  function ocupadasPorOtras(r) {
+    var oc = {};
+    activas().forEach(function (x) {
+      if (x.id === r.id) return;
+      if (momento(r.entrada, r.horaEntrada) < momento(x.salida, x.horaSalida) && momento(r.salida, r.horaSalida) > momento(x.entrada, x.horaEntrada))
+        (x.asignaciones || []).forEach(function (a) { oc[a.habitacion] = x.grupo; });
+    });
+    return oc;
+  }
+  /** Fecha del formulario en que se basa el reparto guardado ('' si no se basa en ninguno). */
+  function repartoSegun(r) { return (r.asignaciones || []).reduce(function (m, a) { return a.segun && a.segun > m ? a.segun : m; }, ''); }
+  function avisoReparto(r) {
+    var f = r.formulario, hay = (r.asignaciones || []).length;
+    if (!f || !f.datos || !pideGrupo(r) || r.estado === 'Cancelada') return '';
+    var seg = repartoSegun(r);
+    if (!hay) return '<div class="aviso-suave">El grupo indicó cómo quiere repartirse. Pulse «Reparto de habitaciones» para ver la propuesta.</div>';
+    if (seg && f.enviadoEl > seg) return '<div class="aviso-suave">El grupo volvió a enviar su formulario el ' + marcaCorta(f.enviadoEl) + '. Revise el reparto («Volver a proponer»).</div>';
+    return '';
+  }
+
+  /**
+   * Propone un reparto: matrimonios en dobles, compartidas de dos en dos, individuales de una en una y jóvenes en literas.
+   * Busca habitaciones seguidas (números consecutivos) para que el grupo quede junto. «fijas» son las cambiadas a mano: no se tocan.
+   */
+  function proponerReparto(r, pide, fijas) {
+    var oc = ocupadasPorOtras(r), usadas = {};
+    fijas.forEach(function (a) { usadas[a.habitacion] = true; });
+    var libres = habitaciones().filter(function (h) { return h.estado === 'Disponible' && !oc[h.numero] && !usadas[h.numero]; })
+      .sort(function (a, b) { return a.numero - b.numero; });
+    // Lo que falta por repartir (se descuenta lo que ya está fijado a mano)
+    var falta = {};
+    Object.keys(pide).forEach(function (u) { falta[u] = pide[u]; });
+    fijas.forEach(function (a) { if (falta[a.uso] != null) falta[a.uso] = Math.max(0, falta[a.uso] - a.personas); });
+    var out = [];
+    // Jóvenes: primero las habitaciones de literas
+    var jov = falta['Jóvenes'] || 0;
+    libres.filter(esLiteras).sort(function (a, b) { return a.capacidad - b.capacidad || a.numero - b.numero; }).forEach(function (h) {
+      if (jov <= 0) return;
+      var p = Math.min(h.capacidad, jov); out.push({ habitacion: h.numero, personas: p, uso: 'Jóvenes', manual: false }); jov -= p; usadas[h.numero] = true;
+    });
+    // Unidades para el resto de habitaciones
+    var uds = [];
+    for (var i = 0; i < Math.floor((falta.Matrimonio || 0) / 2); i++) uds.push({ p: 2, uso: 'Matrimonio', orden: 0 });
+    var comp = falta.Compartida || 0;
+    for (i = 0; i < Math.floor(comp / 2); i++) uds.push({ p: 2, uso: 'Compartida', orden: 1 });
+    for (i = 0; i < Math.floor(jov / 2); i++) uds.push({ p: 2, uso: 'Jóvenes', orden: 2 });
+    for (i = 0; i < (falta.Individual || 0); i++) uds.push({ p: 1, uso: 'Individual', orden: 3 });
+    if (comp % 2) uds.push({ p: 1, uso: 'Compartida', orden: 4 });
+    if (jov % 2) uds.push({ p: 1, uso: 'Jóvenes', orden: 5 });
+    var pool = libres.filter(function (h) { return !usadas[h.numero] && !esLiteras(h); });
+    pool = pool.concat(libres.filter(function (h) { return !usadas[h.numero] && esLiteras(h); })); // literas libres, al final
+    pool.sort(function (a, b) { return a.numero - b.numero; });
+    var k = Math.min(uds.length, pool.length), mejor = null;
+    // Ventana de k habitaciones seguidas con menos distancia entre la primera y la última (y en la misma fila si se puede)
+    for (var s = 0; s + k <= pool.length && k; s++) {
+      var v = pool.slice(s, s + k);
+      var filas = {}; v.forEach(function (h) { filas[/superior/i.test(h.ubicacion) ? 'S' : 'I'] = 1; });
+      var lit = v.filter(esLiteras).length;
+      var nota = (v[k - 1].numero - v[0].numero) * 10 + (Object.keys(filas).length - 1) * 5 + lit * 3 +
+        v.reduce(function (t, h) { return t + h.capacidad; }, 0) * 0.1;
+      if (!mejor || nota < mejor.nota) mejor = { nota: nota, v: v };
+    }
+    if (mejor) {
+      var hs = mejor.v.slice().sort(function (a, b) { return a.capacidad - b.capacidad || a.numero - b.numero; });
+      uds.sort(function (a, b) { return a.orden - b.orden; }).slice(0, k).forEach(function (u, j) {
+        out.push({ habitacion: hs[j].numero, personas: u.p, uso: u.uso, manual: false });
+      });
+    }
+    var puestas = out.reduce(function (t, a) { return t + a.personas; }, 0);
+    var pedidas = Object.keys(falta).reduce(function (t, u) { return t + falta[u]; }, 0);
+    return { lista: out, faltan: Math.max(0, pedidas - puestas) };
+  }
+
+  function datosReserva(r) {
+    return { id: r.id, tipo: tipo(r), grupo: r.grupo, responsable: r.responsable || '', telefono: r.telefono || '', email: r.email || '',
+      entrada: r.entrada, horaEntrada: r.horaEntrada, salida: r.salida, horaSalida: r.horaSalida, estado: r.estado,
+      observaciones: r.observaciones || '', personas: r.personas || '' };
+  }
+
+  function pintarReparto(id) {
+    var r = reserva(id);
+    if (!r || tipo(r) !== 'Alojamiento') { vista.innerHTML = botonVolver() + '<div class="vacio">Esta reserva no tiene alojamiento.</div>'; enlazarVolver(); return; }
+    var pide = pideGrupo(r), f = r.formulario;
+    var lista = (r.asignaciones || []).map(function (a) { return { habitacion: a.habitacion, personas: a.personas, uso: a.uso || '', manual: !!a.manual, segun: a.segun || '' }; });
+    var segun = repartoSegun(r), cambiado = false, aviso = '';
+    function base() {
+      // Sin formulario: todas las personas como «Compartida»
+      if (pide) return pide;
+      var n = (r.personas || 0) - ((r.servicios || []).reduce(function (m, x) { return Math.max(m, x.bebes || 0); }, 0));
+      return { Matrimonio: 0, Compartida: Math.max(0, n), Individual: 0, 'Jóvenes': 0 };
+    }
+    function proponer() {
+      var fijas = lista.filter(function (a) { return a.manual && a.personas > 0; });
+      var p = proponerReparto(r, base(), fijas);
+      segun = f && f.enviadoEl ? f.enviadoEl : '';
+      lista = fijas.concat(p.lista);
+      cambiado = true;
+      aviso = p.faltan ? '<div class="aviso-suave" style="border-color:#B42318">No hay sitio para todos: faltan <b>' + p.faltan + '</b> personas por colocar en esas fechas. Revise otras reservas o añada habitaciones a mano.</div>' :
+        '<div class="aviso-ok">' + (pide ? 'La app ha propuesto este reparto según el formulario del grupo' + (f && f.enviadoEl ? ' (' + marcaCorta(f.enviadoEl) + ')' : '') : 'La app ha propuesto este reparto con las personas de la reserva') +
+        '. Puede cambiarlo y pulsar «Guardar reparto».</div>';
+    }
+    if (!lista.length) proponer();
+    else if (f && f.enviadoEl && segun && f.enviadoEl > segun) aviso = '<div class="aviso-suave">El grupo volvió a enviar su formulario el ' + marcaCorta(f.enviadoEl) + '. Pulse «Volver a proponer» para rehacer el reparto (lo cambiado a mano se mantiene).</div>';
+
+    function resumen() {
+      var asig = {}, nh = {};
+      lista.forEach(function (a) { if (!a.personas) return; var u = a.uso || 'Otro'; asig[u] = (asig[u] || 0) + a.personas; nh[u] = (nh[u] || 0) + 1; });
+      var b = base(), filas = '', tp = 0, ta = 0, th = 0;
+      var nombres = { Matrimonio: 'Matrimonios', Compartida: 'Comparten habitación', Individual: 'Individuales', 'Jóvenes': 'Jóvenes en literas', Otro: 'Otro / sin uso' };
+      USOS.forEach(function (u) {
+        var p = b[u] || 0, a = asig[u] || 0, h = nh[u] || 0;
+        if (!p && !a) return;
+        tp += p; ta += a; th += h;
+        filas += '<span>' + nombres[u] + '</span><span class="r">' + (p || '—') + '</span><span class="r ' + (a === p ? 'ok' : 'mal') + '">' + (a === p ? '✓ ' : '') + a + ' en ' + h + ' hab.</span>';
+      });
+      return '<div class="tarjeta rep-res"><div class="rep-grid"><b>' + (pide ? 'Pide el grupo' : 'Personas') + '</b><b class="r">Pax</b><b class="r">Asignado</b>' + filas +
+        '<b>Total</b><b class="r">' + tp + '</b><b class="r">' + ta + ' en ' + th + ' hab.</b></div></div>';
+    }
+    function filaRep(a, i) {
+      var h = hab(a.habitacion) || { tipo: '', capacidad: 0 };
+      return '<div class="rep-fila" data-i="' + i + '"><div class="rep-nom"><b>Hab. ' + a.habitacion + '</b> <small>' + esc(h.tipo) + ' · ' + h.capacidad + ' plazas</small>' +
+        (a.manual ? ' <span class="tag-man">cambiada a mano</span>' : '') +
+        '<select class="entrada rep-uso" aria-label="Uso de la habitación ' + a.habitacion + '">' +
+        ['<option value=""' + (!a.uso ? ' selected' : '') + '>Sin indicar</option>'].concat(USOS.map(function (u) { return '<option' + (a.uso === u ? ' selected' : '') + '>' + u + '</option>'; })).join('') +
+        '</select></div>' +
+        '<div class="paso"><button type="button" data-d="-1" aria-label="Quitar una persona"' + (a.personas <= 0 ? ' disabled' : '') + '>−</button>' +
+        '<output>' + a.personas + '/' + h.capacidad + '</output>' +
+        '<button type="button" data-d="1" aria-label="Añadir una persona"' + (a.personas >= h.capacidad ? ' disabled' : '') + '>+</button></div></div>';
+    }
+    function pinta() {
+      lista.sort(function (a, b) { return a.habitacion - b.habitacion; });
+      var tot = lista.reduce(function (t, a) { return t + a.personas; }, 0);
+      vista.innerHTML = botonVolver() +
+        '<div class="tarjeta"><h2>' + esc(r.grupo) + '</h2><p class="sub" style="margin:-6px 0 0">' + esc(legible(r.entrada)) + ' → ' + esc(legible(r.salida)) + ' · ' + noches(r) + ' noches</p></div>' +
+        aviso + resumen() +
+        '<div class="tarjeta"><h2>Habitaciones</h2>' + (lista.length ? lista.map(filaRep).join('') : '<p class="sub">Sin habitaciones.</p>') +
+        '<div class="fila-btns" style="margin-top:10px"><button type="button" class="btn sec" id="rAnadir">+ Añadir habitación</button><button type="button" class="btn sec" id="rProponer">Volver a proponer</button></div>' +
+        '<p class="sub" style="margin:10px 0 0;font-size:13px">Lo que cambie a mano queda marcado y no se toca al volver a proponer. Las habitaciones con 0 personas se quitan al guardar.</p></div>' +
+        '<div class="form-espacio"></div><div class="pie-form"><div class="total"><b>' + tot + '</b> pernoctan · ' + lista.filter(function (a) { return a.personas; }).length + ' hab.</div>' +
+        '<button class="btn" id="rGuardar">Guardar reparto</button></div>';
+      enlazarVolver();
+      $$('.rep-fila').forEach(function (el) {
+        var a = lista[+el.dataset.i];
+        el.querySelector('select').onchange = function () {
+          // 2.0.2 · Un matrimonio son 2 pax en su habitación
+          if (this.value === 'Matrimonio') {
+            var hm = hab(a.habitacion);
+            if (hm && hm.capacidad < 2) { this.value = a.uso; return toast('La habitación ' + a.habitacion + ' es de 1 plaza: no cabe un matrimonio.', true); }
+            a.personas = 2;
+          }
+          a.uso = this.value; a.manual = true; cambiado = true; pinta();
+        };
+        el.querySelector('.paso').onclick = function (e) {
+          var b = e.target.closest('button[data-d]'); if (!b) return;
+          var h = hab(a.habitacion); a.personas = Math.max(0, Math.min(h.capacidad, a.personas + Number(b.dataset.d))); a.manual = true; cambiado = true; pinta();
+        };
+      });
+      $('#rProponer').onclick = function () {
+        var hay = lista.some(function (a) { return a.manual; });
+        confirmar('Se rehará el reparto' + (pide ? ' según el formulario del grupo' : '') + '.' + (hay ? ' Las habitaciones cambiadas a mano se mantienen.' : ''), 'Volver a proponer')
+          .then(function (ok) { if (ok) { proponer(); pinta(); } });
+      };
+      $('#rAnadir').onclick = function () {
+        var oc = ocupadasPorOtras(r), ya = {}; lista.forEach(function (a) { ya[a.habitacion] = 1; });
+        var libres = habitaciones().slice().sort(function (a, b) { return a.numero - b.numero; })
+          .filter(function (h) { return h.estado === 'Disponible' && !oc[h.numero] && !ya[h.numero]; });
+        if (!libres.length) return toast('No quedan habitaciones libres en esas fechas.', true);
+        modal('<p><b>Añadir habitación</b><br><span class="sub">Libres en esas fechas</span></p><div class="rep-libres">' +
+          libres.map(function (h) { return '<button type="button" class="chip" data-n="' + h.numero + '"><b>' + h.numero + '</b> <small>' + esc(h.tipo) + '</small></button>'; }).join('') +
+          '</div><div class="fila-btns" style="margin-top:10px"><button class="btn borde" data-r="0">Volver</button></div>', function (e, cerrar) {
+          var b = e.target.closest('[data-n]');
+          if (b) { lista.push({ habitacion: +b.dataset.n, personas: 1, uso: 'Otro', manual: true, segun: '' }); cambiado = true; cerrar(); pinta(); return; }
+          if (e.target.closest('[data-r]')) cerrar();
+        });
+      };
+      $('#rGuardar').onclick = function () {
+        if (S.sinConexion) return toast('Sin conexión.', true);
+        var asign = lista.filter(function (a) { return a.personas > 0; }).map(function (a) { return { habitacion: a.habitacion, personas: a.personas, uso: a.uso, manual: a.manual, segun: segun }; });
+        cargando(true);
+        usarDB(function () { return DB.guardarReserva(datosReserva(r), asign, 'reparto'); })
+          .then(function () { toast('Reparto guardado'); ir('reserva/' + encodeURIComponent(r.id)); })
+          .catch(function (e) { toast(e.message, true); }).then(function () { cargando(false); });
+      };
+    }
+    pinta();
+  }
+
+  // ---------------- 1.8.0 · Hoja de habitaciones (uso interno) ----------------
+  function consumosHab(p, n) {
+    var cam = Math.max(1, cfgNum('consumo.cambio_cama') || 7), toa = Math.max(1, cfgNum('consumo.cambio_toallas') || 3);
+    var juegosCama = n > 0 ? 1 + Math.floor((n - 1) / cam) : 1, juegosToalla = n > 0 ? 1 + Math.floor((n - 1) / toa) : 1;
+    return {
+      cama: p * (cfgNum('consumo.persona.cama') || 0) * juegosCama,
+      tg: p * (cfgNum('consumo.persona.toalla_grande') || 0) * juegosToalla,
+      tp: p * (cfgNum('consumo.persona.toalla_pequena') || 0) * juegosToalla,
+      rollos: cfgNum('consumo.hab.rollos') || 0,
+      gel: cfgNum('consumo.hab.gel') || 0
+    };
+  }
+  function htmlHojaHab(r) {
+    var n = noches(r), lista = (r.asignaciones || []).slice().sort(function (a, b) { return a.habitacion - b.habitacion; });
+    var T = { p: 0, cama: 0, tg: 0, tp: 0, rollos: 0, gel: 0 };
+    var filas = lista.map(function (a) {
+      var h = hab(a.habitacion) || {}, c = consumosHab(a.personas, n);
+      T.p += a.personas; T.cama += c.cama; T.tg += c.tg; T.tp += c.tp; T.rollos += c.rollos; T.gel += c.gel;
+      return '<tr><td class="l"><b>' + a.habitacion + '</b></td><td class="l">' + esc(h.tipo || '') + '</td><td class="l">' + esc(a.uso || '—') + '</td><td>' + a.personas + '</td>' +
+        '<td>' + c.cama + '</td><td>' + c.tg + '</td><td>' + c.tp + '</td><td>' + c.rollos + '</td><td>' + c.gel + '</td></tr>';
+    }).join('');
+    var bebes = (r.servicios || []).reduce(function (m, x) { return Math.max(m, x.bebes || 0); }, 0);
+    var cam = cfgNum('consumo.cambio_cama') || 7, toa = cfgNum('consumo.cambio_toallas') || 3;
+    return '<div class="hoja-doc">' +
+      '<div class="hd-cab"><div><div class="hd-casa">' + esc(cfg('casa.nombre') || 'Casa de Espiritualidad María Madre') + '</div>' +
+      '<div class="hd-dir">Uso interno · no se entrega al grupo</div></div>' +
+      '<div class="hd-tit"><div>Hoja de habitaciones</div><small>Ref. ' + esc(r.id) + ' · ' + legible(hoyTxt()) + '</small></div></div>' +
+      '<div class="hd-datos">' +
+      '<div><small>GRUPO</small><b>' + esc(r.grupo) + '</b></div>' +
+      '<div><small>RESPONSABLE</small>' + esc(r.responsable || '—') + (r.telefono ? ' · ' + esc(r.telefono) : '') + '</div>' +
+      '<div><small>ENTRADA</small>' + esc(diaSemana(r.entrada)) + ', ' + esc(r.horaEntrada) + '</div>' +
+      '<div><small>SALIDA</small>' + esc(diaSemana(r.salida)) + ', ' + esc(r.horaSalida) + '</div>' +
+      '<div><small>PERNOCTAN</small>' + T.p + ' personas en ' + lista.length + ' habitaciones · ' + n + ' noches</div>' +
+      '<div><small>NIÑOS DE 0 A ' + (cfg('edad.gratis_hasta') || 4) + '</small>' + (bebes ? bebes + ' (no ocupan cama; consultar si necesitan algo)' : 'ninguno') + '</div></div>' +
+      '<h4>Plano</h4>' + plano(r.asignaciones) +
+      '<h4>Preparación por habitación</h4><table class="hd-tabla"><tr><th class="l">Hab.</th><th class="l">Tipo</th><th class="l">Uso</th><th>Pax</th><th>Juegos cama</th><th>Toallas grandes</th><th>Toallas pequeñas</th><th>Papel</th><th>Gel</th></tr>' +
+      (filas || '<tr><td class="l" colspan="9">Sin habitaciones asignadas.</td></tr>') +
+      '<tr class="hd-total"><td class="l" colspan="3"><b>Total</b></td><td><b>' + T.p + '</b></td><td><b>' + T.cama + '</b></td><td><b>' + T.tg + '</b></td><td><b>' + T.tp + '</b></td><td><b>' + T.rollos + '</b></td><td><b>' + T.gel + '</b></td></tr></table>' +
+      '<div class="hd-pie">Ropa de cama: un juego por persona' + (n > cam ? ', con cambio cada ' + cam + ' noches (incluido en la cuenta)' : '') +
+      '. Toallas: ' + (n > toa ? 'cambio cada ' + toa + ' noches (incluido en la cuenta)' : 'un juego por persona') + '. Reglas en Administración › Consumos.</div>' +
+      '</div>';
+  }
+  function pintarHojaHab(id) {
+    var r = reserva(id);
+    if (!r) { vista.innerHTML = botonVolver() + '<div class="vacio">La reserva no existe.</div>'; enlazarVolver(); return; }
+    vista.innerHTML = botonVolver() +
+      '<div class="hoja-barra"><div class="fila-btns"><button class="btn sec" id="hhRep">Cambiar reparto</button><button class="btn" id="hhPdf">Imprimir / PDF</button></div></div>' +
+      '<div class="hoja-marco">' + htmlHojaHab(r) + '</div>';
+    enlazarVolver();
+    $('#hhRep').onclick = function () { ir('reparto/' + encodeURIComponent(r.id)); };
+    $('#hhPdf').onclick = function () {
+      var t = document.title; document.title = 'Habitaciones · ' + r.grupo;
+      document.body.classList.add('imprimiendo-hoja'); window.print();
+      setTimeout(function () { document.body.classList.remove('imprimiendo-hoja'); document.title = t; }, 800);
+    };
+  }
+
+  // ---------------- Administración (solo administradores) ----------------
+  function pintarAdmin() {
+    if (!S.datos.esAdmin) { vista.innerHTML = botonVolver() + '<div class="vacio">Solo los administradores pueden ver esta pantalla.</div>'; enlazarVolver(); return; }
+    var cfg = S.datos.config || [], grupos = [], por = {}, orig = {};
+    var abiertos = lsGet('adAbiertos') || {};
+    cfg.forEach(function (a) { orig[a.clave] = a.valor; if (!por[a.grupo]) { por[a.grupo] = []; grupos.push(a.grupo); } por[a.grupo].push(a); });
+    function campo(a) {
+      var id = 'ad_' + a.clave.replace(/\W/g, '_');
+      var etiqueta = esc(a.descripcion) + (a.tipo === 'euros' ? ' (€)' : '');
+      if (a.tipo === 'largo') return '<label class="campo"><span>' + etiqueta + '</span><textarea class="entrada" id="' + id + '" data-k="' + esc(a.clave) + '" maxlength="' + (a.clave === 'texto.contrato' ? 30000 : 4000) + '"' + (String(a.valor || '').length > 400 ? ' rows="' + (a.clave === 'texto.contrato' ? 20 : 10) + '"' : '') + '>' + esc(a.valor) + '</textarea></label>';
+      var extra = a.tipo === 'euros' ? ' inputmode="decimal" placeholder="a consultar"' : a.tipo === 'num' ? ' inputmode="numeric"' : ' maxlength="120"';
+      return '<label class="campo"><span>' + etiqueta + '</span><input class="entrada" id="' + id + '" data-k="' + esc(a.clave) + '" value="' + esc(a.valor) + '"' + extra + ' autocomplete="off"></label>';
+    }
+    vista.innerHTML = botonVolver() +
+      '<div class="aviso-suave">Solo para administradores. Los cambios valen para los documentos que se hagan a partir de ahora; los ya enviados no cambian. Un precio vacío sale como «a consultar».</div>' +
+      grupos.map(function (g) {
+        return '<details class="tarjeta ad-grupo" data-g="' + esc(g) + '"' + (abiertos[g] ? ' open' : '') + '><summary><span class="ad-tit">' + esc(g) + '</span>' +
+          '<span class="ad-n">' + por[g].length + '</span><span class="ad-punto" title="Cambios sin guardar"></span></summary>' + por[g].map(campo).join('') + '</details>';
+      }).join('') +
+      '<div class="form-espacio"></div><div class="pie-form"><div class="total" id="adEstado">Sin cambios</div><button class="btn" id="adGuardar">Guardar cambios</button></div>';
+    function cambios() {
+      var v = {};
+      $$('[data-k]').forEach(function (el) { var k = el.dataset.k; if (String(el.value).trim() !== String(orig[k] == null ? '' : orig[k]).trim()) v[k] = el.value; });
+      return v;
+    }
+    vista.oninput = function () {
+      var est = $('#adEstado'); if (!est) return;
+      var v = cambios(), n = Object.keys(v).length;
+      est.textContent = n ? n + (n === 1 ? ' cambio sin guardar' : ' cambios sin guardar') : 'Sin cambios';
+      $$('.ad-grupo').forEach(function (d) { d.classList.toggle('con-cambios', $$('[data-k]', d).some(function (el) { return v.hasOwnProperty(el.dataset.k); })); });
+    };
+    $$('.ad-grupo').forEach(function (d) { d.addEventListener('toggle', function () { var a = lsGet('adAbiertos') || {}; a[d.dataset.g] = d.open; lsSet('adAbiertos', a); }); });
+    enlazarVolver();
+    $('#adGuardar').onclick = function () {
+      var v = cambios(), n = Object.keys(v).length;
+      if (!n) return toast('No hay cambios que guardar.');
+      if (S.sinConexion) return toast('Sin conexión.', true);
+      cargando(true);
+      usarDB(function () { return DB.guardarAjustes(v); }).then(function (d) { toast('Guardado · ' + d.cambios + (d.cambios === 1 ? ' cambio' : ' cambios')); pintarAdmin(); })
+        .catch(function (e) { toast(e.message, true); }).then(function () { cargando(false); });
+    };
+  }
+
   function pintarAjustes() {
     var c = lsGet('cache'), aj = S.datos.ajustes || {};
     vista.innerHTML =
@@ -846,6 +1888,7 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
       '<div class="dato"><span>Habitaciones disponibles</span><span>' + habitaciones().filter(function (h) { return h.estado === 'Disponible'; }).length + ' de ' + habitaciones().length + '</span></div>' +
       '<div class="dato"><span>Plazas disponibles</span><span>' + capacidadDisponible() + '</span></div>' +
       '<div class="dato"><span>Horario por defecto</span><span>Entrada ' + esc(aj.horaEntrada || '12:00') + ' · Salida ' + esc(aj.horaSalida || '16:00') + '</span></div></div>' +
+      (S.datos.esAdmin ? '<div class="tarjeta"><h2>Administración</h2><p class="sub" style="margin:0 0 10px">Precios, edades, datos de la casa, contrato, consumos y textos de los documentos.</p><button class="btn ancho" id="aAdmin">Abrir Administración</button></div>' : '') +
       '<details class="tarjeta mant"><summary>Mantenimiento (solo administración)</summary>' +
       '<p class="sub">Aviso de prueba: comprueba que llegan los avisos de reservas provisionales a ' + esc(aj.avisoPara || 'la cuenta de la casa') + '.</p>' +
       '<button class="btn borde ancho" id="aProbar">Enviar un aviso de prueba</button>' +
@@ -853,15 +1896,19 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
       '<button class="btn borde ancho" id="aRegenerar">Regenerar calendario de Google</button>' +
       (DEMO ? '<button class="btn borde ancho" id="aReiniciar" style="margin-top:10px">Reiniciar demostración</button>' : '') +
       '</details>' +
-      '<button class="btn peligro ancho" id="aSalir">Cerrar sesión en este móvil</button>' +
-      '<p class="sub" style="text-align:center;font-size:12px;margin-top:18px">App ' + VERSION + ' · Puente ' + esc(aj.version || '1.0.0') + (DEMO ? ' · demostración' : '') + '</p>';
+      '<div class="tarjeta"><h2>Versión</h2>' +
+      '<div class="dato"><span>App</span><span><b>' + VERSION + '</b> · ' + VERSION_FECHA + '</span></div>' +
+      '<div class="dato"><span>Servidor (puente)</span><span><b>' + esc(aj.version || '—') + '</b></span></div>' +
+      '<div class="dato"><span>Datos comprobados</span><span>' + (S.ultimaCarga ? new Date(S.ultimaCarga).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' }) : '—') + '</span></div>' +
+      '<p class="sub" style="margin:8px 0 0;font-size:11.5px">Pantalla ' + screen.width + '×' + screen.height + ' · ventana ' + window.innerWidth + '×' + window.innerHeight + ' · app ' + Math.round($('#app').getBoundingClientRect().height) + (window.navigator.standalone ? ' · instalada' : '') + '</p></div>' +
+      '<button class="btn peligro ancho" id="aSalir">Cerrar sesión en este móvil</button>';
     function accion(nombre, texto, fmt) {
       return function () {
         if (S.sinConexion) return toast('Sin conexión.', true);
         confirmar(texto, 'Continuar').then(function (ok) {
           if (!ok) return;
           cargando(true);
-          api(nombre).then(function (d) { toast(fmt(d)); pintarAjustes(); })
+          usarDB(function () { return DB[nombre](); }).then(function (d) { toast(fmt(d)); pintarAjustes(); })
             .catch(function (e) { toast(e.message, true); }).then(function () { cargando(false); });
         });
       };
@@ -875,6 +1922,7 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
         if (!ok) return; window.__GAS_RESET__ && window.__GAS_RESET__(); lsDel('demoIniciada2'); lsDel('cache'); location.reload();
       });
     };
+    if ($('#aAdmin')) $('#aAdmin').onclick = function () { ir('admin'); };
     $('#aSalir').onclick = function () { confirmar('Tendrás que volver a escribir la clave para entrar.', 'Cerrar sesión', true).then(function (ok) { if (ok) salir(); }); };
   }
 
@@ -887,16 +1935,20 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
   };
   $('#btnRecargar').onclick = function () { recargar(); };
   window.addEventListener('hashchange', pintar);
-  // Al volver a la app: actualizar datos sin borrar lo que se esté escribiendo.
-  document.addEventListener('visibilitychange', function () { if (!document.hidden && S.clave && S.datos) recargar(true); });
+  // Al volver a la app (si han pasado más de 2 minutos): comprobar con el reloj y luego mostrar.
+  // Si se está escribiendo en un formulario, no se toca nada.
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden || !S.clave || !S.datos || editando()) return;
+    if (Date.now() - (S.ultimaCarga || 0) < 120000) return;
+    recargar(true); // comprobación de fondo: sin reloj
+  });
   avisoConexion();
 
   S.clave = lsGet('clave'); S.gestor = lsGet('gestor');
-  if (S.clave) {
-    var c = lsGet('cache');
-    if (c) { S.datos = c.datos; pintar(); }
-    recargar(!!c);
-  } else pintarLogin();
+  // Al abrir: primero se comprueban los datos (con el reloj) y luego se muestra la pantalla, una sola vez.
+  // Si no hay conexión, se muestran los últimos datos guardados con el aviso de «sin conexión».
+  if (S.clave) recargar(false, true);
+  else pintarLogin();
 
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(function () {});
 })();
