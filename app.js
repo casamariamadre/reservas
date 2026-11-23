@@ -3,8 +3,8 @@
   'use strict';
   var C = window.CONFIG || {};
   var DEMO = !C.API_URL;
-  var VERSION = '2.1.3';
-  var VERSION_FECHA = '22/11/2026';
+  var VERSION = '2.2.0';
+  var VERSION_FECHA = '23/11/2026';
   var S = { clave: null, gestor: null, datos: null, mes: null, sinConexion: false, filtro: 'proximas', verCanceladas: false,
             relModo: 'todas', relDesde: '', relHasta: '', findesTodos: false };
   var $ = function (s, el) { return (el || document).querySelector(s); };
@@ -609,6 +609,23 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
     return { pagada: s > 0, b: null };
   }
 
+  /** Lunes de la semana en que falta un mes para la entrada (igual que fechaAviso_ del puente). */
+  function fechaAviso(entrada) {
+    var p = String(entrada || '').split('-');
+    if (p.length < 3) return '';
+    var y = +p[0], m = +p[1] - 1, d = +p[2];
+    m -= 1; if (m < 0) { m = 11; y -= 1; }
+    var ultimo = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+    var f = new Date(Date.UTC(y, m, Math.min(d, ultimo)));
+    f.setUTCDate(f.getUTCDate() - ((f.getUTCDay() + 6) % 7));
+    return f.toISOString().slice(0, 10);
+  }
+  function diasDesde(marca, hoy) {
+    var f = String(marca || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(f)) return 0;
+    return Math.round((aFecha(hoy) - aFecha(f)) / 864e5);
+  }
+
   /** Los pasos de la reserva, con su estado: ok (hecho), ahora (en curso), aviso (revisar), pend (pendiente). */
   function pasosReserva(r) {
     var P = [], hoy = hoyTxt(), aloj = tipo(r) === 'Alojamiento', idq = encodeURIComponent(r.id);
@@ -617,13 +634,54 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
     P.push(r.estado === 'Confirmada'
       ? { t: 'Reserva', ap: 'datos', e: 'ok', txt: 'Confirmada', cq: cuandoQuien(conf) }
       : { t: 'Reserva', ap: 'datos', e: 'ahora', txt: 'Provisional', cq: cuandoQuien(crea) || (r.creadoPor ? fechaCorta(r.creadoEl) + ' · ' + r.creadoPor : ''),
-          acc: { txt: 'Confirmar', fn: function () { ir('editar/' + idq + '?confirmar=1'); } }, sig: 'Confirmar la reserva' });
-    // 2. Formulario del grupo
+          acc: { txt: 'Confirmar', fn: function () { ir('editar/' + idq + '?confirmar=1'); } } });
+    // 2. Presupuesto y condiciones (2.2.0: solo la firma, sin la señal)
+    var fi = r.firma, papel = marcaDoc(r, 'Contrato firmado en papel', 'Contrato: marcado sin firmar');
+    var cEnv = ultimaNota(r, ['Contrato enviado', 'Contrato: enlace creado']);
+    var firmado = (fi && fi.estado === 'Firmado') || papel.enviado, esperaFirma = !firmado && fi && fi.estado === 'Pendiente';
+    var cTxt = fi && fi.estado === 'Firmado' ? 'Aceptado por ' + fi.nombre : papel.enviado ? 'Firmado en papel' : esperaFirma ? 'Enviado, esperando al grupo' : 'Sin enviar';
+    var cCq = fi && fi.estado === 'Firmado' ? fechaCorta(fi.firmadoEl) + ' · ' + fi.nombre : papel.enviado ? cuandoQuien(papel.b) : esperaFirma ? cuandoQuien(cEnv) : '';
+    var verPre = { txt: 'Ver presupuesto', fn: function () { ir('hoja/' + idq + '?modo=presupuesto'); } };
+    P.push({ t: 'Presupuesto y condiciones', ap: 'condiciones', e: firmado ? 'ok' : esperaFirma ? 'ahora' : 'pend',
+      txt: cTxt, cq: cCq,
+      acc: firmado ? { txt: 'Ver condiciones', fn: function () { ir('contrato/' + idq); } }
+        : { txt: esperaFirma ? 'Reenviar' : 'Enviar para aceptar', fn: function () { enviarContrato(r); } },
+      marcas: [verPre].concat(firmado ? [] : [{ txt: 'Firmado en papel', tipo: 'contrato_papel' }]).concat(papel.enviado ? [{ txt: 'Deshacer: papel', tipo: 'contrato_papel_no' }] : []),
+      espera: esperaFirma,
+      sig: !firmado && !esperaFirma ? 'Enviar el presupuesto y las condiciones' : '' });
+    // 3. Señal
+    var fz = senalPagada(r), tieneComp = !!(fi && fi.comprobante);
+    var fechaFirma = (fi && fi.firmadoEl) || (papel.enviado && papel.b ? papel.b.fecha : '');
+    var mas7 = firmado && !fz.pagada && !tieneComp && fechaFirma && diasDesde(fechaFirma, hoy) >= 7;
+    var sEst = fz.pagada ? 'ok' : (tieneComp || mas7) ? 'aviso' : firmado ? 'ahora' : 'pend';
+    var sTxt = fz.pagada ? 'Pagada' : tieneComp ? 'Comprobante recibido · comprobar' : mas7 ? 'Pendiente · más de 7 días' : 'Pendiente';
+    var sCq = fz.pagada ? (fz.b ? cuandoQuien(fz.b) : '') : tieneComp ? (fi.comprobanteEl ? fechaCorta(fi.comprobanteEl) + ' · Grupo' : '') : '';
+    var fzMarca = fz.pagada ? { txt: 'Deshacer: señal', tipo: 'fianza_pendiente' } : { txt: 'Marcar señal pagada', tipo: 'fianza_pagada' };
+    var sMarcas = [];
+    if (tieneComp) sMarcas.push({ txt: 'Ver comprobante', fn: function () { verComprobante(r); } });
+    sMarcas.push(fzMarca);
+    if (!fz.pagada && (firmado || esperaFirma)) sMarcas.push({ txt: 'Recordar la señal', fn: function () { recordarSenal(r); } });
+    var sSig = '', sAcc = null, sSigMarca = '';
+    if (!fz.pagada) {
+      if (tieneComp) {
+        sSig = 'Comprobar la señal';
+        sAcc = { txt: 'Ver comprobante', fn: function () { verComprobante(r); } };
+      } else if (mas7) {
+        sSig = 'Recordar la señal';
+        sAcc = { txt: 'Recordar la señal', fn: function () { recordarSenal(r); } };
+      }
+    }
+    P.push({ t: 'Señal', ap: 'condiciones', e: sEst, txt: sTxt, cq: sCq,
+      acc: sAcc, marcas: sMarcas,
+      espera: firmado && !fz.pagada && !tieneComp && !mas7,
+      sig: sSig, sigMarca: sSigMarca });
+    // 4. Formulario del grupo
     var f = r.formulario, fuera = hoy > r.entrada;
     var env = ultimaNota(r, ['Formulario: enlace enviado', 'Formulario: enlace compartido', 'Formulario: enlace copiado', 'Formulario: enlace creado']);
     var rec = ultimaNota(r, ['Formulario recibido']), apl = ultimaNota(r, ['Formulario aplicado']);
+    var tocaForm = fz.pagada && hoy >= fechaAviso(r.entrada);
     if (!f) P.push(fuera ? { t: 'Formulario', ap: 'formulario', e: 'pend', txt: 'No se envió', cq: '' }
-      : { t: 'Formulario', ap: 'formulario', e: 'pend', txt: 'Sin enviar', cq: '', acc: { txt: 'Enviar', fn: function () { enviarEnlaceForm(r); } }, sig: 'Enviar el formulario al grupo' });
+      : { t: 'Formulario', ap: 'formulario', e: 'pend', txt: 'Sin enviar', cq: '', acc: { txt: 'Enviar', fn: function () { enviarEnlaceForm(r); } }, sig: tocaForm ? 'Enviar el formulario al grupo' : '' });
     else if (f.estado === 'Recibido') P.push({ t: 'Formulario', ap: 'formulario', e: 'aviso', txt: 'Recibido · falta revisar y aplicar', cq: cuandoQuien(rec) || fechaCorta(f.enviadoEl) + ' · Grupo',
       acc: { txt: 'Revisar', fn: function () { ir('formulario/' + idq); } }, sig: 'Revisar y aplicar el formulario' });
     else if (f.estado === 'Aplicado') P.push({ t: 'Formulario', ap: 'formulario', e: 'ok', txt: 'Recibido y aplicado', cq: cuandoQuien(apl) });
@@ -631,37 +689,31 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
     else if (f.estado === 'Cerrado' || fuera) P.push({ t: 'Formulario', ap: 'formulario', e: 'pend', txt: 'Sin respuesta del grupo', cq: '' });
     else P.push({ t: 'Formulario', ap: 'formulario', e: 'ahora', txt: 'Enviado · esperando al grupo', cq: cuandoQuien(env), espera: true,
       acc: { txt: 'Reenviar', fn: function () { enviarEnlaceForm(r); } } });
-    // 3. Habitaciones
+    // 5. Habitaciones (solo con alojamiento)
     if (aloj) {
       var rep = ultimaNota(r, ['Reparto de habitaciones']), n = (r.asignaciones || []).length;
       var reenv = f && f.enviadoEl && repartoSegun(r) && f.enviadoEl > repartoSegun(r);
-      if (!n) P.push({ t: 'Habitaciones', ap: 'habitaciones', e: 'pend', txt: 'Sin reparto', cq: '', acc: { txt: 'Repartir', fn: function () { ir('reparto/' + idq); } }, sig: 'Hacer el reparto de habitaciones' });
+      var formAplicado = !!(f && f.estado === 'Aplicado');
+      if (!n) P.push({ t: 'Habitaciones', ap: 'habitaciones', e: 'pend', txt: 'Sin reparto', cq: '', acc: { txt: 'Repartir', fn: function () { ir('reparto/' + idq); } }, sig: formAplicado ? 'Hacer el reparto de habitaciones' : '' });
       else P.push({ t: 'Habitaciones', ap: 'habitaciones', e: reenv ? 'aviso' : 'ok', txt: n + ' hab. · ' + pernoctan(r) + ' pers.' + (reenv ? ' · el grupo cambió su formulario' : ''),
         cq: cuandoQuien(rep), acc: { txt: reenv ? 'Revisar' : 'Ver', fn: function () { ir('reparto/' + idq); } }, sig: reenv ? 'Revisar el reparto de habitaciones' : '' });
     }
-    // 4. Presupuesto y condiciones (2.1.0: un solo paso; el grupo los acepta con un enlace y paga la señal)
-    var fi = r.firma, papel = marcaDoc(r, 'Contrato firmado en papel', 'Contrato: marcado sin firmar'), fz = senalPagada(r);
-    var cEnv = ultimaNota(r, ['Contrato enviado', 'Contrato: enlace creado']);
-    var firmado = (fi && fi.estado === 'Firmado') || papel.enviado, esperaFirma = !firmado && fi && fi.estado === 'Pendiente';
-    var cTxt = fi && fi.estado === 'Firmado' ? 'Aceptado por ' + fi.nombre : papel.enviado ? 'Firmado en papel' : esperaFirma ? 'Enviado, esperando al grupo' : 'Sin enviar';
-    var cCq = fi && fi.estado === 'Firmado' ? fechaCorta(fi.firmadoEl) + ' · ' + fi.nombre : papel.enviado ? cuandoQuien(papel.b) : esperaFirma ? cuandoQuien(cEnv) : '';
-    var fzMarca = fz.pagada ? { txt: 'Deshacer: señal', tipo: 'fianza_pendiente' } : { txt: 'Marcar señal pagada', tipo: 'fianza_pagada' };
-    var verPre = { txt: 'Ver presupuesto', fn: function () { ir('hoja/' + idq + '?modo=presupuesto'); } };
-    P.push({ t: 'Presupuesto y condiciones', ap: 'condiciones', e: firmado && fz.pagada ? 'ok' : firmado || fz.pagada || esperaFirma ? 'ahora' : 'pend',
-      txt: cTxt + ' · Señal ' + (fz.pagada ? 'pagada' : 'pendiente'),
-      cq: [cCq, fz.b ? 'señal ' + cuandoQuien(fz.b) : ''].filter(Boolean).join(' · '),
-      acc: firmado ? { txt: 'Ver condiciones', fn: function () { ir('contrato/' + idq); } }
-        : { txt: esperaFirma ? 'Reenviar' : 'Enviar para aceptar', fn: function () { enviarContrato(r); } },
-      marcas: [verPre].concat(firmado ? [] : [{ txt: 'Firmado en papel', tipo: 'contrato_papel' }]).concat(papel.enviado ? [{ txt: 'Deshacer: papel', tipo: 'contrato_papel_no' }] : []).concat([fzMarca]),
-      espera: esperaFirma && fz.pagada,
-      sig: !firmado && !esperaFirma ? 'Enviar el presupuesto y las condiciones' : !fz.pagada ? 'Comprobar la señal' : '',
-      sigMarca: !firmado && !esperaFirma ? '' : 'fianza_pagada' });
-    // 6. Estancia
+    // 6. Presupuesto actualizado (solo tiene sentido con el formulario aplicado)
+    var pa = marcaDoc(r, 'Presupuesto actualizado enviado', 'Presupuesto actualizado: marcado');
+    var paEnv = pa.enviado || !!(fi && fi.actualizadoEl && !pa.b);
+    var paCq = pa.enviado ? cuandoQuien(pa.b) : (fi && fi.actualizadoEl ? fechaCorta(fi.actualizadoEl) : '');
+    var formApl = !!(f && f.estado === 'Aplicado');
+    P.push({ t: 'Presupuesto actualizado', ap: 'condiciones', e: paEnv ? 'ok' : formApl ? 'ahora' : 'pend',
+      txt: paEnv ? 'Enviado' : 'Sin enviar', cq: paCq,
+      acc: { txt: 'Enviar presupuesto actualizado', fn: function () { enviarPresupuestoActualizado(r); } },
+      marcas: paEnv ? [{ txt: 'Deshacer: presupuesto actualizado', tipo: 'presupuesto_actualizado_no' }] : [],
+      sig: formApl && !paEnv ? 'Enviar el presupuesto actualizado' : '' });
+    // 7. Estancia
     var dias = Math.round((aFecha(r.entrada) - aFecha(hoy)) / 864e5);
     P.push(hoy < r.entrada ? { t: 'Estancia', ap: 'estancia', e: 'pend', txt: 'Empieza ' + (dias === 1 ? 'mañana' : 'en ' + dias + ' días'), cq: '' }
       : hoy <= r.salida ? { t: 'Estancia', ap: 'estancia', e: 'ahora', txt: 'En curso hasta el ' + legible(r.salida).slice(0, 5), cq: '' }
       : { t: 'Estancia', ap: 'estancia', e: 'ok', txt: 'Terminada el ' + legible(r.salida).slice(0, 5), cq: '' });
-    // 7. Liquidación
+    // 8. Liquidación
     var liq = marcaDoc(r, 'Liquidación enviada', 'Liquidación: marcada'), empezo = hoy >= r.entrada;
     P.push(liq.enviado ? { t: 'Liquidación', ap: 'estancia', e: 'ok', txt: 'Enviada', cq: cuandoQuien(liq.b), acc: { txt: 'Ver', fn: function () { ir('hoja/' + idq + '?modo=liquidacion'); } }, marca: { txt: 'Deshacer', tipo: 'liquidacion_no' } }
       : { t: 'Liquidación', ap: 'estancia', e: empezo ? 'ahora' : 'pend', txt: 'Pendiente', cq: '', acc: empezo ? { txt: 'Hacer', fn: function () { ir('hoja/' + idq + '?modo=liquidacion'); } } : null,
@@ -687,6 +739,54 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
       usarDB(function () { return DB.enlaceContrato(r.id, h.total); })
         .then(function (d) { cargando(false); compartirEnlace(reserva(r.id) || r, d.enlace, 'contrato'); })
         .catch(function (e) { cargando(false); toast(e.message, true); });
+    });
+  }
+  function recordarSenal(r) {
+    if (S.sinConexion) return toast('Sin conexión.', true);
+    var h = calcularHoja(r);
+    var pedir = (r.firma && r.firma.enlace) ? Promise.resolve({ enlace: r.firma.enlace })
+      : usarDB(function () { return DB.enlaceContrato(r.id, h.total); });
+    cargando(true);
+    pedir.then(function (d) {
+      cargando(false);
+      compartirEnlace(reserva(r.id) || r, d.enlace, 'recordar_senal');
+    }).catch(function (e) { cargando(false); toast(e.message, true); });
+  }
+  function enviarPresupuestoActualizado(r) {
+    if (S.sinConexion) return toast('Sin conexión.', true);
+    var h = calcularHoja(r);
+    var seguir = h.total > 0 ? Promise.resolve(true)
+      : confirmar('La hoja de estancia de esta reserva no tiene importe (no hay servicios). ¿Enviar el presupuesto actualizado igualmente?', 'Enviar igualmente');
+    seguir.then(function (ok) {
+      if (!ok) return;
+      cargando(true);
+      usarDB(function () { return DB.actualizarPresupuesto(r.id, h.total); })
+        .then(function (d) { cargando(false); compartirEnlace(reserva(r.id) || r, d.enlace, 'presupuesto_actualizado'); })
+        .catch(function (e) { cargando(false); toast(e.message, true); });
+    });
+  }
+  function verComprobante(r) {
+    if (S.sinConexion) return toast('Sin conexión.', true);
+    var w = window.open('', '_blank');
+    if (w) { try { w.document.title = 'Cargando comprobante…'; w.document.body.innerHTML = '<p style="font:15px Arial,sans-serif;padding:24px;color:#555">Cargando el comprobante…</p>'; } catch (e) {} }
+    cargando(true);
+    usarDB(function () { return DB.verComprobante(r.id); }).then(function (d) {
+      cargando(false);
+      var bin = atob(d.base64 || ''), arr = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+      var blob = new Blob([arr], { type: d.mime || 'application/pdf' });
+      var url = URL.createObjectURL(blob);
+      if (w && !w.closed) {
+        w.location.replace(url);
+      } else {
+        var a = document.createElement('a'); a.href = url; a.target = '_blank'; a.download = d.nombre || 'comprobante';
+        document.body.appendChild(a); a.click(); a.remove();
+      }
+      setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+    }).catch(function (e) {
+      cargando(false);
+      if (w && !w.closed) w.close();
+      toast(e.message || 'No se pudo abrir el comprobante.', true);
     });
   }
 
@@ -748,6 +848,10 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
     if (a === 'Reparto de habitaciones') return 'Reparto de habitaciones guardado (' + b.detalle + ')';
     if (a === 'Formulario aplicado') return 'Formulario aplicado a la reserva';
     if (a === 'Aviso provisional') return 'Aviso de provisional enviado a la casa';
+    if (a === 'Aviso señal') return 'Aviso de señal pendiente enviado a la casa';
+    if (a === 'Aviso formulario') return 'Aviso para enviar el formulario enviado a la casa';
+    if (a === 'Comprobante de señal') return 'Comprobante de la señal recibido (' + b.detalle + ')';
+    if (/^Firma: /.test(a)) return a + (b.detalle ? ' · ' + b.detalle : '');
     return a.replace(/^Formulario: /, 'Formulario: ');
   }
 
@@ -798,8 +902,16 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
     function apartado(clave, titulo, resumen, cuerpo) {
       return '<details class="apartado" data-ap="' + clave + '"' + (q.abrir === clave ? ' open' : '') + '><summary><b>' + titulo + '</b><span>' + resumen + '</span></summary><div class="ap-cuerpo">' + cuerpo + '</div></details>';
     }
-    var iCond = idxPaso('Presupuesto y condiciones'), iLiq = idxPaso('Liquidación');
+    var iCond = idxPaso('Presupuesto y condiciones'), iSen = idxPaso('Señal'), iForm = idxPaso('Formulario'), iPreAct = idxPaso('Presupuesto actualizado'), iLiq = idxPaso('Liquidación');
     var fTarjeta = (!bloq && !canc) ? tarjetaFormulario(r).replace(/^<div class="tarjeta"><h2>Formulario del grupo<\/h2>/, '').replace(/<\/div>$/, '') : '';
+    var condResumen = iCond >= 0 ? pasos[iCond].txt + (iSen >= 0 ? ' · Señal ' + pasos[iSen].txt.toLowerCase() : '') : '';
+    var condCuerpo = iCond >= 0 ? (
+      '<p class="sub" style="margin:0"><b>Firma:</b> ' + esc(pasos[iCond].txt) + (pasos[iCond].cq ? ' · <small>' + esc(pasos[iCond].cq) + '</small>' : '') + '</p>' +
+      '<p class="sub" style="margin:6px 0 0;font-size:13px">El grupo recibe un enlace para ver el presupuesto, aceptar las condiciones y firmar. El pago de la señal confirma la reserva.</p>' +
+      botonesPaso(pasos[iCond], iCond) +
+      (iSen >= 0 ? '<p class="sub" style="margin:14px 0 0"><b>Señal:</b> ' + esc(pasos[iSen].txt) + (pasos[iSen].cq ? ' · <small>' + esc(pasos[iSen].cq) + '</small>' : '') + '</p>' + botonesPaso(pasos[iSen], iSen) : '') +
+      (iPreAct >= 0 ? '<p class="sub" style="margin:14px 0 0"><b>Presupuesto actualizado:</b> ' + esc(pasos[iPreAct].txt) + (pasos[iPreAct].cq ? ' · <small>' + esc(pasos[iPreAct].cq) + '</small>' : '') + '</p>' + botonesPaso(pasos[iPreAct], iPreAct) : '')
+    ) : '';
     vista.innerHTML = botonVolver() +
       // Cabecera
       '<div class="tarjeta exp-cab ' + clases(r) + '"><h2>' + esc(r.grupo) + '</h2>' +
@@ -808,19 +920,16 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
       // Siguiente paso
       (pasos.length ? '<div class="exp-sig">' + (sig ? '<span>Siguiente paso</span><button class="btn" id="dSig">' + esc(sig.sig) + '</button>'
         : '<span>' + (pasos.some(function (p) { return p.espera; }) ? 'Esperando respuesta del grupo.' : 'Todo al día.') + '</span>') + '</div>' : '') +
-      // Apartados plegados (2.1.2: aquí están todas las acciones)
+      // Apartados plegados (2.2.0: Datos → Presupuesto y condiciones → Formulario → Habitaciones → Hoja de estancia)
       apartado('datos', 'Datos de la reserva', esc(r.responsable || tipo(r)), datos) +
-      (fTarjeta ? apartado('formulario', 'Formulario del grupo', esc(pasos[1] ? pasos[1].txt : ''), fTarjeta) : '') +
+      (iCond >= 0 ? apartado('condiciones', 'Presupuesto y condiciones', esc(condResumen), condCuerpo) : '') +
+      (fTarjeta ? apartado('formulario', 'Formulario del grupo', esc(iForm >= 0 ? pasos[iForm].txt : ''), fTarjeta) : '') +
       (aloj && !canc ? apartado('habitaciones', 'Habitaciones', (r.asignaciones || []).length ? pernoctan(r) + ' pers. en ' + r.asignaciones.length + ' hab.' : 'Sin reparto',
         avisoReparto(r) + plano(r.asignaciones) + '<div class="fila-btns" style="margin-top:10px"><button class="btn sec" id="dReparto">Reparto de habitaciones</button>' +
         ((r.asignaciones || []).length ? '<button class="btn sec" id="dHojaHab">Hoja de habitaciones</button>' : '') + '</div>') : '') +
       (!bloq && !canc ? apartado('estancia', 'Hoja de estancia', '', '<p class="sub" style="margin:0 0 10px">' + resumenServicios(r) + '</p>' +
         '<div class="fila-btns"><button class="btn sec" id="dServ">Servicios y datos</button><button class="btn sec" id="dHoja">Ver hoja de estancia</button></div>' +
         (iLiq >= 0 ? '<p class="sub" style="margin:14px 0 0"><b>Liquidación:</b> ' + esc(pasos[iLiq].txt) + (pasos[iLiq].cq ? ' · ' + esc(pasos[iLiq].cq) : '') + '</p>' + botonesPaso(pasos[iLiq], iLiq) : '')) : '') +
-      (iCond >= 0 ? apartado('condiciones', 'Presupuesto y condiciones', esc(pasos[iCond].txt),
-        '<p class="sub" style="margin:0">' + esc(pasos[iCond].txt) + (pasos[iCond].cq ? '<br><small>' + esc(pasos[iCond].cq) + '</small>' : '') + '</p>' +
-        '<p class="sub" style="margin:8px 0 0;font-size:13px">El grupo recibe un enlace para ver el presupuesto, aceptar las condiciones y firmar. El pago de la señal confirma la reserva.</p>' +
-        botonesPaso(pasos[iCond], iCond)) : '') +
       // Evolución (solo seguimiento)
       (pasos.length ? '<div class="tarjeta exp-pasos"><h2>Evolución</h2>' + pasos.map(lineaPaso).join('') + '</div>' : '') +
       // Bitácora
@@ -851,6 +960,10 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
       l.onkeydown = function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); abrir(); } };
     });
     if ($('#dSig')) $('#dSig').onclick = function () {
+      if (sig.ap === 'condiciones' && sig.sig === 'Comprobar la señal') {
+        var d = vista.querySelector('.apartado[data-ap="condiciones"]');
+        if (d) { d.open = true; d.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+      }
       if (sig.acc && !sig.sigMarca) return sig.acc.fn();
       if (sig.sigMarca === '' && sig.acc) return sig.acc.fn();
       if (sig.sigMarca) return anotar(r, sig.sigMarca, '', 'Anotado');
@@ -1524,29 +1637,47 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
     };
   }
   function compartirEnlace(r, enlace, cual) {
-    var contrato = cual === 'contrato';
+    var contrato = cual === 'contrato', recordar = cual === 'recordar_senal', presupAct = cual === 'presupuesto_actualizado';
     // Cada forma de envío queda en la bitácora (sin esperar ni mostrar el reloj).
     var apuntado = {};
     function apuntar(t) {
       if (contrato) t = 'contrato_enviado';
+      else if (recordar) t = 'senal_recordada';
+      else if (presupAct) t = 'presupuesto_actualizado';
       if (apuntado[t] || S.sinConexion) return; apuntado[t] = 1; usarDB(function () { return DB.anotar(r.id, t); }).catch(function () {});
     }
+    var fechas = legible(r.entrada) + ' a ' + legible(r.salida);
+    var impSenal = euros(cfgNum('contrato.senal') != null ? cfgNum('contrato.senal') : 200);
+    var resp = r.responsable ? ', ' + r.responsable : '';
     var texto = contrato
-      ? 'Hola. Os enviamos el presupuesto y las condiciones de vuestra estancia en la Casa de Espiritualidad María Madre (' + legible(r.entrada) + ' a ' + legible(r.salida) + '). Podéis revisarlos y aceptarlos desde el móvil en este enlace:'
-      : 'Hola. Para preparar vuestra estancia en la Casa de Espiritualidad María Madre (' + legible(r.entrada) + ' a ' + legible(r.salida) +
+      ? 'Hola. Os enviamos el presupuesto y las condiciones de vuestra estancia en la Casa de Espiritualidad María Madre (' + fechas + '). Podéis revisarlos y aceptarlos desde el móvil en este enlace:'
+      : recordar
+      ? 'Hola' + resp + '. Le recordamos la señal de ' + impSenal + ' para su reserva del ' + fechas + ' en la Casa María Madre. Puede adjuntar el comprobante en este enlace:'
+      : presupAct
+      ? 'Hola. Le enviamos el presupuesto actualizado de su reserva del ' + fechas + ' en la Casa de Espiritualidad María Madre. Puede consultarlo en el mismo enlace:'
+      : 'Hola. Para preparar vuestra estancia en la Casa de Espiritualidad María Madre (' + fechas +
       '), por favor rellenad este formulario. Podéis corregirlo con el mismo enlace hasta el día de entrada:';
-    modal('<p style="margin-bottom:6px"><b>' + (contrato ? 'Enlace del presupuesto y las condiciones' : 'Enlace del formulario') + '</b></p><p class="sub" style="margin:0 0 10px">Envíalo al responsable del grupo. Solo sirve para esta reserva.</p>' +
+    var titModal = contrato ? 'Enlace del presupuesto y las condiciones'
+      : recordar ? 'Recordar la señal'
+      : presupAct ? 'Enlace del presupuesto actualizado'
+      : 'Enlace del formulario';
+    var asunto = (contrato ? 'Presupuesto y condiciones'
+      : recordar ? 'Recordatorio de la señal'
+      : presupAct ? 'Presupuesto actualizado'
+      : 'Formulario') + ' de su estancia · Casa María Madre';
+    if (presupAct) apuntar('presupuesto_actualizado');
+    modal('<p style="margin-bottom:6px"><b>' + titModal + '</b></p><p class="sub" style="margin:0 0 10px">Envíalo al responsable del grupo. Solo sirve para esta reserva.</p>' +
       '<input class="entrada" id="feEnlace" readonly value="' + esc(enlace) + '" style="font-size:14px">' +
       '<div class="fila-btns" style="margin-top:10px">' + (navigator.share ? '<button class="btn" data-r="share">Compartir…</button>' : '') +
       '<button class="btn sec" data-r="copiar">Copiar</button></div>' +
       '<div class="fila-btns" style="margin-top:8px"><a class="btn sec" data-log="enlace_whatsapp" target="_blank" rel="noopener" href="https://wa.me/?text=' + encodeURIComponent(texto + ' ' + enlace) + '">WhatsApp</a>' +
-      '<a class="btn sec" data-log="enlace_correo" href="mailto:' + esc(r.email || '') + '?subject=' + encodeURIComponent((contrato ? 'Presupuesto y condiciones' : 'Formulario') + ' de su estancia · Casa María Madre') + '&body=' + encodeURIComponent(texto + '\n\n' + enlace) + '">Correo</a></div>' +
+      '<a class="btn sec" data-log="enlace_correo" href="mailto:' + esc(r.email || '') + '?subject=' + encodeURIComponent(asunto) + '&body=' + encodeURIComponent(texto + '\n\n' + enlace) + '">Correo</a></div>' +
       '<div class="fila-btns" style="margin-top:8px"><button class="btn borde" data-r="0">Cerrar</button></div>',
       function (e, cerrar) {
         var lg = e.target.closest('[data-log]'); if (lg) apuntar(lg.dataset.log);
         var b = e.target.closest('[data-r]'); if (!b) return;
         if (b.dataset.r === '0') { cerrar(); pintar(); return; }
-        if (b.dataset.r === 'share') { navigator.share({ title: (contrato ? 'Presupuesto y condiciones' : 'Formulario') + ' · Casa María Madre', text: texto, url: enlace }).then(function () { apuntar('enlace_compartido'); }).catch(function () {}); return; }
+        if (b.dataset.r === 'share') { navigator.share({ title: asunto, text: texto, url: enlace }).then(function () { apuntar('enlace_compartido'); }).catch(function () {}); return; }
         if (b.dataset.r === 'copiar') {
           var i = $('#feEnlace'); i.select(); i.setSelectionRange(0, 9999);
           apuntar('enlace_copiado');
@@ -1577,6 +1708,7 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
       fila('Adultos (desde ' + adulto + ')', p.adultos) + fila('Niños de ' + (+gratis + 1) + ' a ' + (adulto - 1), p.ninos) + fila('Niños de 0 a ' + gratis, p.bebes) +
       fila('Total en la reserva', pers, r.personas, 'personas') + '</div>' +
       '<div class="tarjeta"><h2>Contacto y datos para documentos</h2>' +
+      (c.responsable != null ? fila('Responsable', c.responsable, r.responsable, 'responsable') : '') +
       fila('Teléfono', c.telefono, r.telefono, 'teléfono') + fila('Correo', c.email, r.email, 'correo') +
       fila('Entidad', g.entidad, gd.entidad || '') + fila('CIF', g.cif, gd.cif || '', 'CIF') + fila('Dirección', g.direccion, gd.direccion || '') +
       fila('Representante', g.representante, gd.representante || '') + fila('DNI', g.dni, gd.dni || '', 'DNI') + fila('Cargo', g.cargo, gd.cargo || '') + '</div>' +

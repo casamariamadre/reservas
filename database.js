@@ -21,8 +21,10 @@
  *   DB.importarCalendario()               → { importadas, omitidas, estado }
  *   DB.enlaceContrato(id, importe)        → { id, enlace, estado }   (enlace para firmar el contrato desde el móvil)
  *   DB.verContrato(id, importe)           → { firmado, documento, firma?, nombre?, … }
- *   DB.leerFirma(enlace) / DB.enviarFirma(enlace, datos)   (página pública de firma)
- *   DB.anotar(id, tipo, texto)            → { id, estado }   (bitácora: nota, enlace enviado, presupuesto/contrato/liquidación enviados, fianza)
+ *   DB.actualizarPresupuesto(id, importe) → { id, enlace, actualizadoEl, estado }
+ *   DB.verComprobante(id)                 → { nombre, tipo, mime, base64, comprobanteEl }
+ *   DB.leerFirma(enlace) / DB.enviarFirma(enlace, datos) / DB.adjuntarComprobante(enlace, datos) (página pública de firma)
+ *   DB.anotar(id, tipo, texto)            → { id, estado }   (bitácora: nota, enlace enviado, presupuesto/contrato/liquidación enviados, señal)
  *   DB.prepararFormulario(id)             → { id, enlace, estado, estado }   (crea el enlace del grupo si no existe)
  *   DB.aplicarFormulario(id)              → { id, estado }   (pasa a la reserva lo que envió el grupo)
  *   DB.abrirFormulario(id, abierto)       → { id, estado, estado }
@@ -72,8 +74,11 @@
     importarCalendario: async function () { return llamar('importarCalendario'); },
     enlaceContrato: async function (id, importe) { return llamar('contratoEnlace', { id: id, importe: importe || 0 }); },
     verContrato: async function (id, importe) { return llamar('contratoVer', { id: id, importe: importe }); },
+    actualizarPresupuesto: async function (id, importe) { return llamar('contratoActualizarPresupuesto', { id: id, importe: importe || 0 }); },
+    verComprobante: async function (id) { return llamar('comprobanteVer', { id: id }); },
     leerFirma: async function (enlace) { return llamar('firmaLeer', {}, String(enlace || '')); },
     enviarFirma: async function (enlace, datos) { return llamar('firmaEnviar', datos || {}, String(enlace || '')); },
+    adjuntarComprobante: async function (enlace, datos) { return llamar('firmaComprobante', datos || {}, String(enlace || '')); },
     anotar: async function (id, tipo, texto) { return llamar('anotar', { id: id, tipo: tipo, texto: texto || '' }); },
     prepararFormulario: async function (id) { return llamar('formularioEnlace', { id: id }); },
     aplicarFormulario: async function (id) { return llamar('formularioAplicar', { id: id }); },

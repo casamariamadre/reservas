@@ -1,7 +1,8 @@
-/* Presupuesto y condiciones · Casa María Madre (2.1.3)
+/* Presupuesto y condiciones · Casa María Madre (2.2.0)
    Página pública: se abre con el enlace propio de cada reserva (firma.html#<enlace>).
-   El responsable del grupo ve el presupuesto y las condiciones, revisa sus datos (ya rellenos con lo que envió
-   en el formulario), marca una sola casilla obligatoria y firma con el dedo. No usa ninguna clave de gestor: todo va con ese enlace, a través de database.js. */
+   El responsable del grupo ve el presupuesto y las condiciones, revisa sus datos,
+   marca una sola casilla obligatoria, firma con el dedo y puede adjuntar el comprobante de la señal.
+   No usa ninguna clave de gestor: todo va con ese enlace, a través de database.js. */
 (function () {
   'use strict';
   var TOKEN = decodeURIComponent((location.hash || '').replace(/^#/, ''));
@@ -36,7 +37,7 @@
   function htmlDoc(doc, datos, firma, imagenes, comunicaciones) {
     var c = doc.consentimiento || {};
     var cuerpo = (doc.bloques || []).map(function (b) {
-      var x = esc(b.x).replace(/\{(representante|dni|cargo|domicilio|cif_cliente)\}/g, function (m, k) {
+      var x = esc(b.x).replace(/\{(representante|dni|cargo|domicilio|cif_cliente|entidad)\}/g, function (m, k) {
         var v = datos[k]; return '<span class="hueco" data-h="' + k + '">' + (v ? esc(v) : '________') + '</span>';
       });
       return b.t === 'h' ? '<h3 class="ct-h">' + x + '</h3>' : b.t === 'c' ? '<h4 class="ct-c">' + x + '</h4>' : b.t === 'd' ? '<p class="ct-d">' + x + '</p>' : '<p>' + x + '</p>';
@@ -54,19 +55,97 @@
   }
   function svgFirma(d) { return '<svg class="ct-firma" viewBox="0 0 600 200" preserveAspectRatio="xMidYMid meet"><path d="' + esc(d) + '" fill="none" stroke="#123" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>'; }
 
-  // ---------------- Firmar ----------------
+  // ---------------- Presupuesto y Pago de la señal ----------------
   function presupuesto() {
     var p = INFO.presupuesto || {}, casa = INFO.casa || {};
     if (!p.total) return '';
-    return '<div class="card"><div class="card-tit pri">Presupuesto</div>' +
+    return '<div class="card"><div class="card-tit pri">Presupuesto' + (p.actualizadoEl ? ' <span class="hint" style="font-weight:400">· Actualizado el ' + esc(legible(p.actualizadoEl)) + '</span>' : '') + '</div>' +
       '<div class="pre-fila"><span>Total de la estancia</span><b>' + eur(p.total) + '</b></div>' +
       '<div class="pre-fila"><span>Señal, al aceptar</span><b>' + eur(p.senal) + '</b></div>' +
       '<div class="pre-fila"><span>Resto, ' + (p.diasPago ? 'en los ' + esc(p.diasPago) + ' días siguientes a la salida' : 'después de la salida') + '</span><b>' + eur(p.resto) + '</b></div>' +
       '<div class="hint" style="margin-top:6px">El resto se ajusta en la liquidación a los servicios realmente prestados.' + (casa.iban ? ' Cuenta: ' + esc(casa.iban) + '.' : '') + '</div></div>';
   }
+
+  function bloqueSenal() {
+    var s = INFO.senal || {}, p = INFO.presupuesto || {}, casa = INFO.casa || {}, r = INFO.reserva || {};
+    var imp = s.importe != null ? s.importe : p.senal;
+    if (!imp && !s.pagada && !s.comprobanteEl) return '';
+    var concepto = 'Señal – ' + (r.grupo || '') + ' – ' + (r.entrada ? legible(r.entrada) : '');
+    if (s.pagada) {
+      return '<div class="card senal-box ok"><div class="card-tit">Pago de la señal</div>' +
+        '<p class="senal-msg ok">✓ Señal recibida. Su reserva está confirmada.</p></div>';
+    }
+    var datosPago =
+      (imp ? '<div class="pre-fila"><span>Importe de la señal</span><b>' + eur(imp) + '</b></div>' : '') +
+      (casa.iban ? '<div class="pre-fila"><span>Cuenta (IBAN)</span><b>' + esc(casa.iban) + '</b></div>' : '') +
+      '<div class="pre-fila"><span>Concepto</span><b>' + esc(concepto) + '</b></div>' +
+      '<div class="pre-fila"><span>Plazo</span><b>En los 7 días siguientes a la aceptación</b></div>';
+    var input = '<input type="file" id="fComp" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" hidden>';
+    if (s.comprobanteEl) {
+      return '<div class="card senal-box" id="boxSenal"><div class="card-tit pri">Pago de la señal</div>' + datosPago +
+        '<div class="senal-est" id="sCompMsg"><p class="senal-msg ok">✓ Comprobante recibido el ' + esc(marca(s.comprobanteEl)) + '.</p>' +
+        '<div class="senal-btns"><button type="button" class="b-sec" id="bAdjuntar">Sustituir comprobante</button></div>' +
+        '<div class="hint" style="margin-top:6px">PDF, JPG o PNG (máximo 5 MB).</div></div>' + input + '</div>';
+    }
+    return '<div class="card senal-box" id="boxSenal"><div class="card-tit pri">Pago de la señal</div>' + datosPago +
+      '<div class="senal-est" id="sCompMsg">' +
+        '<p class="senal-preg">¿Adjuntar ahora el comprobante de la señal?</p>' +
+        '<div class="senal-btns">' +
+          '<button type="button" class="b-pri" id="bAdjuntar">Adjuntar comprobante</button>' +
+          '<button type="button" class="b-sec" id="bMasTarde">Lo adjuntaré más tarde</button>' +
+        '</div>' +
+        '<div class="hint" style="margin-top:6px">Solo PDF, JPG o PNG, de hasta 5 MB.</div>' +
+      '</div>' + input + '</div>';
+  }
+
+  function enlazarSenal() {
+    var inp = $('#fComp'), bAdj = $('#bAdjuntar'), bMas = $('#bMasTarde'), msg = $('#sCompMsg');
+    if (!inp) return;
+    if (bAdj) bAdj.onclick = function () { inp.value = ''; inp.click(); };
+    if (bMas) bMas.onclick = function () {
+      msg.innerHTML = '<p class="senal-msg">De acuerdo. Puede volver a este mismo enlace cuando quiera para adjuntarlo. Si pasan 7 días sin recibirlo, la Casa se lo recordará.</p>' +
+        '<div class="senal-btns"><button type="button" class="b-sec" id="bAdjuntar">Adjuntar comprobante</button></div>';
+      enlazarSenal();
+    };
+    inp.onchange = function () {
+      var f = inp.files && inp.files[0];
+      if (!f) return;
+      var ext = (f.name.split('.').pop() || '').toLowerCase();
+      var mime = (f.type || '').toLowerCase();
+      var tipo = (ext === 'pdf' || mime === 'application/pdf') ? 'pdf'
+        : (ext === 'jpg' || ext === 'jpeg' || mime === 'image/jpeg') ? 'jpg'
+        : (ext === 'png' || mime === 'image/png') ? 'png' : '';
+      if (!tipo) return toast('Solo se admiten archivos PDF, JPG o PNG.', true);
+      if (f.size > 5 * 1024 * 1024) return toast('El archivo supera el tamaño máximo de 5 MB.', true);
+      if (bAdj) { bAdj.disabled = true; bAdj.textContent = 'Subiendo…'; }
+      var rd = new FileReader();
+      rd.onload = function () {
+        var b64 = String(rd.result || '').replace(/^data:[^;]+;base64,/, '');
+        DB.adjuntarComprobante(TOKEN, { tipo: tipo, base64: b64 }).then(function (r) {
+          INFO.senal = INFO.senal || {};
+          INFO.senal.comprobanteEl = r.comprobanteEl;
+          msg.innerHTML = '<p class="senal-msg ok">✓ Comprobante recibido. La Casa lo comprobará y confirmará su reserva.</p>' +
+            '<div class="senal-btns"><button type="button" class="b-sec" id="bAdjuntar">Sustituir comprobante</button></div>';
+          toast('Comprobante recibido');
+          enlazarSenal();
+        }).catch(function (e) {
+          if (bAdj) { bAdj.disabled = false; bAdj.textContent = 'Adjuntar comprobante'; }
+          toast(e.message || 'No se pudo enviar el comprobante.', true);
+        });
+      };
+      rd.onerror = function () {
+        if (bAdj) { bAdj.disabled = false; bAdj.textContent = 'Adjuntar comprobante'; }
+        toast('No se pudo leer el archivo.', true);
+      };
+      rd.readAsDataURL(f);
+    };
+  }
+
+  // ---------------- Firmar ----------------
   function pintar() {
     var p = INFO.prefill || {}, c = (INFO.documento || {}).consentimiento || {};
-    var completos = p.representante && p.domicilio;
+    var nomInicial = p.representante || p.responsable || '';
+    var completos = nomInicial.trim().length >= 2 && (p.telefono || '').trim() && (p.email || '').trim();
     vista.innerHTML =
       '<div><h2>Presupuesto y condiciones</h2><div class="hint">Revíselos. Después marque la casilla y firme con el dedo.</div></div>' +
       presupuesto() +
@@ -75,11 +154,14 @@
         '<details class="zf-paso" id="dDatos"' + (completos ? '' : ' open') + '>' +
           '<summary><span class="zf-sum-izq" id="sDatos"></span><span class="zf-sum-der">Revisar o corregir ›</span></summary>' +
           '<div class="zf-cuerpo">' +
-            '<label class="f" for="fNom">Nombre y apellidos</label><input id="fNom" type="text" autocomplete="name" value="' + esc(p.representante) + '">' +
-            '<label class="f" for="fDni">DNI (recomendado)</label><input id="fDni" type="text" autocomplete="off" value="' + esc(p.dni) + '">' +
-            '<label class="f" for="fCar">En calidad de (cargo)</label><input id="fCar" type="text" autocomplete="off" placeholder="Por ejemplo: presidente, responsable del grupo" value="' + esc(p.cargo) + '">' +
-            '<label class="f" for="fDom">Domicilio social de la entidad</label><input id="fDom" type="text" autocomplete="street-address" placeholder="Calle, número, código postal y localidad" value="' + esc(p.domicilio) + '">' +
-            '<label class="f" for="fCif">CIF de la entidad (si tiene)</label><input id="fCif" type="text" autocomplete="off" value="' + esc(p.cif) + '">' +
+            '<label class="f" for="fNom">Nombre y apellidos de quien firma * <span class="falta-av" id="avNom" hidden>Falta</span></label><input id="fNom" type="text" autocomplete="name" value="' + esc(nomInicial) + '">' +
+            '<label class="f" for="fTel">Teléfono * <span class="falta-av" id="avTel" hidden>Falta</span></label><input id="fTel" type="tel" inputmode="tel" autocomplete="tel" value="' + esc(p.telefono) + '">' +
+            '<label class="f" for="fMail">Correo electrónico * <span class="falta-av" id="avMail" hidden>Falta</span></label><input id="fMail" type="email" inputmode="email" autocomplete="email" value="' + esc(p.email) + '">' +
+            '<label class="f" for="fDni">DNI (opcional)</label><input id="fDni" type="text" autocomplete="off" value="' + esc(p.dni) + '">' +
+            '<label class="f" for="fCar">En calidad de / cargo (opcional)</label><input id="fCar" type="text" autocomplete="off" placeholder="Por ejemplo: presidente, responsable del grupo" value="' + esc(p.cargo) + '">' +
+            '<label class="f" for="fEnt">Entidad (opcional)</label><input id="fEnt" type="text" autocomplete="organization" value="' + esc(p.entidad) + '">' +
+            '<label class="f" for="fCif">CIF de la entidad (opcional)</label><input id="fCif" type="text" autocomplete="off" value="' + esc(p.cif) + '">' +
+            '<label class="f" for="fDom">Domicilio social de la entidad (opcional)</label><input id="fDom" type="text" autocomplete="street-address" placeholder="Calle, número, código postal y localidad" value="' + esc(p.domicilio) + '">' +
           '</div>' +
         '</details>' +
         '<div class="zf-paso zf-casillas">' +
@@ -97,11 +179,11 @@
       '</div>' +
       '<details class="card cond-plegable" id="doc" style="padding:0">' +
         '<summary><span>📄 Condiciones de la reserva (leer)</span><span>›</span></summary>' +
-        htmlDoc(INFO.documento, p, null, false, false) +
+        htmlDoc(INFO.documento, { representante: nomInicial, dni: p.dni, cargo: p.cargo, domicilio: p.domicilio, cif_cliente: p.cif, entidad: p.entidad }, null, false, false) +
       '</details>';
     pie.hidden = false;
     pie.innerHTML = '<button type="button" class="b-pri" id="bFirmar">Aceptar y firmar</button>';
-    ['fNom', 'fDni', 'fCar', 'fDom', 'fCif'].forEach(function (id) { $('#' + id).oninput = actualizarHuecos; });
+    ['fNom', 'fTel', 'fMail', 'fDni', 'fCar', 'fEnt', 'fDom', 'fCif'].forEach(function (id) { if ($('#' + id)) $('#' + id).oninput = actualizarHuecos; });
     $('#aCond').onclick = function (e) { e.preventDefault(); e.stopPropagation(); var d = $('#doc'); d.open = true; d.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
     $('#kAcepto').onchange = function () { if (this.checked && !$('#dFirma').open) $('#dFirma').open = true; };
     actualizarHuecos();
@@ -110,12 +192,18 @@
     $('#bFirmar').onclick = enviar;
   }
   function actualizarHuecos() {
-    var v = { representante: $('#fNom').value.trim(), dni: $('#fDni').value.trim(), cargo: $('#fCar').value.trim(), domicilio: $('#fDom').value.trim(), cif_cliente: $('#fCif').value.trim() };
+    var nom = $('#fNom').value.trim(), tel = $('#fTel') ? $('#fTel').value.trim() : '', mail = $('#fMail') ? $('#fMail').value.trim() : '';
+    var ent = $('#fEnt') ? $('#fEnt').value.trim() : ((INFO.prefill && INFO.prefill.entidad) || '');
+    var v = { representante: nom, dni: $('#fDni').value.trim(), cargo: $('#fCar').value.trim(), domicilio: $('#fDom').value.trim(), cif_cliente: $('#fCif').value.trim(), entidad: ent || (INFO.reserva ? INFO.reserva.grupo : '') };
     Array.prototype.forEach.call(document.querySelectorAll('.hueco'), function (h) { h.textContent = v[h.dataset.h] || '________'; });
+    if ($('#avNom')) $('#avNom').hidden = nom.length >= 2;
+    if ($('#avTel')) $('#avTel').hidden = !!tel;
+    if ($('#avMail')) $('#avMail').hidden = !!mail;
     var s = $('#sDatos');
     if (s) {
-      var ok = v.representante.length >= 3 && v.domicilio.length >= 5;
-      s.textContent = ok ? '① ' + v.representante + ' · ' + v.domicilio : '① Sus datos · Falta completar';
+      var ok = nom.length >= 2;
+      var sub = v.domicilio || tel || mail || '';
+      s.textContent = ok ? '① ' + nom + (sub ? ' · ' + sub : '') : '① Sus datos · Falta completar';
       s.className = 'zf-sum-izq' + (ok ? '' : ' falta');
     }
   }
@@ -166,14 +254,15 @@
   function enviar() {
     var nom = $('#fNom').value.trim(), dni = $('#fDni').value.trim(), car = $('#fCar').value.trim();
     var dom = $('#fDom').value.trim(), cif = $('#fCif').value.trim();
-    if (nom.length < 3) { $('#dDatos').open = true; $('#fNom').focus(); return toast('Escriba su nombre y apellidos.', true); }
-    if (dom.length < 5) { $('#dDatos').open = true; $('#fDom').focus(); return toast('Escriba el domicilio social de la entidad.', true); }
+    var tel = $('#fTel') ? $('#fTel').value.trim() : '', mail = $('#fMail') ? $('#fMail').value.trim() : '';
+    var ent = $('#fEnt') ? $('#fEnt').value.trim() : '';
+    if (nom.length < 2) { $('#dDatos').open = true; $('#fNom').focus(); return toast('Escriba su nombre para firmar.', true); }
     if (!$('#kAcepto').checked) return toast('Marque la casilla obligatoria para poder firmar.', true);
     if (!hayFirma()) { $('#dFirma').open = true; $('#dFirma').scrollIntoView({ behavior: 'smooth', block: 'center' }); return toast('Firme con el dedo dentro del recuadro.', true); }
     var b = $('#bFirmar'); b.disabled = true; b.textContent = 'Firmando…';
     var firma = rutaFirma(), img = !!($('#kImg') && $('#kImg').checked), com = !!($('#kCom') && $('#kCom').checked);
-    DB.enviarFirma(TOKEN, { nombre: nom, dni: dni, cargo: car, domicilio: dom, cif: cif, acepto: true, imagenes: img, comunicaciones: com, firma: firma }).then(function (r) {
-      INFO.firmado = { firmadoEl: r.recibido || r.firmadoEl, nombre: nom, dni: dni, cargo: car, domicilio: dom, cif: cif || '—', imagenes: img, comunicaciones: com, firma: firma,
+    DB.enviarFirma(TOKEN, { nombre: nom, telefono: tel, email: mail, entidad: ent, dni: dni, cargo: car, domicilio: dom, cif: cif, acepto: true, imagenes: img, comunicaciones: com, firma: firma }).then(function (r) {
+      INFO.firmado = { firmadoEl: r.recibido || r.firmadoEl, nombre: nom, dni: dni, cargo: car, domicilio: dom, cif: cif, entidad: ent, imagenes: img, comunicaciones: com, firma: firma,
         documento: INFO.documento };
       fin();
     }).catch(function (e) {
@@ -185,30 +274,37 @@
   // ---------------- Después de firmar ----------------
   function copia() {
     var f = INFO.firmado;
-    return htmlDoc(f.documento || INFO.documento, { representante: f.nombre, dni: f.dni, cargo: f.cargo, domicilio: f.domicilio, cif_cliente: f.cif, firmadoEl: f.firmadoEl }, f.firma, f.imagenes, f.comunicaciones);
+    return htmlDoc(f.documento || INFO.documento, { representante: f.nombre, dni: f.dni, cargo: f.cargo, domicilio: f.domicilio, cif_cliente: f.cif, entidad: f.entidad || (INFO.reserva && INFO.reserva.grupo) || '', firmadoEl: f.firmadoEl }, f.firma, f.imagenes, f.comunicaciones);
   }
   function fin() {
     pie.hidden = true; pie.innerHTML = '';
     document.body.classList.add('fg-final');
     $('#fgToast').hidden = true;
-    var pr = INFO.presupuesto || {}, casa = INFO.casa || {};
     vista.innerHTML = '<div class="fin"><div class="ic" aria-hidden="true">✓</div><h2>¡Gracias! Condiciones aceptadas</h2>' +
-      '<p class="hint">La Casa ha recibido su firma.' + (pr.senal ? ' Para confirmar la reserva, ingrese la señal de ' + eur(pr.senal) + (casa.iban ? ' en la cuenta ' + esc(casa.iban) : '') + '.' : '') + '</p>' +
-      '<p class="hint">Puede guardar una copia en PDF.</p>' +
+      '<p class="hint">La Casa ha recibido su firma.</p></div>' +
+      bloqueSenal() +
+      presupuesto() +
+      '<div class="fin" style="padding-top:10px">' +
+      '<p class="hint">Puede guardar una copia en PDF de las condiciones firmadas.</p>' +
       '<button type="button" class="b-sec b-fin" id="bCopia">Ver / guardar copia (PDF)</button>' +
       '<button type="button" class="b-pri b-fin" id="bTerminar">Terminar</button></div>' +
       '<div class="imprimir-solo">' + copia() + '</div>';
     window.scrollTo(0, 0);
+    enlazarSenal();
     $('#bCopia').onclick = imprimir;
     $('#bTerminar').onclick = function () { $('#fgGrupo').textContent = ''; vista.innerHTML = '<div class="fin adios"><h2>Gracias, le esperamos pronto.</h2></div>'; };
   }
   function yaFirmado() {
     var f = INFO.firmado;
     document.body.classList.add('fg-final');
-    vista.innerHTML = '<div class="card fin"><div class="ic" aria-hidden="true">✓</div><h2>Condiciones aceptadas</h2>' +
+    vista.innerHTML =
+      bloqueSenal() +
+      presupuesto() +
+      '<div class="card fin"><div class="ic" aria-hidden="true">✓</div><h2>Condiciones aceptadas</h2>' +
       '<p class="hint">Aceptadas y firmadas por ' + esc(f.nombre) + ' el ' + esc(marca(f.firmadoEl)) + '.</p>' +
       '<button type="button" class="b-sec b-fin" id="bCopia">Ver / guardar copia (PDF)</button></div>' +
       '<div class="imprimir-solo">' + copia() + '</div>';
+    enlazarSenal();
     $('#bCopia').onclick = imprimir;
   }
   function imprimir() { document.title = 'Condiciones · ' + (INFO.reserva ? INFO.reserva.grupo : ''); window.print(); }

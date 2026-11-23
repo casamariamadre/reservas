@@ -125,3 +125,15 @@ body.fg-final .fg-grupo, body.fg-final .fg-cab { border-bottom: 0; }
 .cond-plegable > summary::-webkit-details-marker { display: none; }
 .cond-plegable[open] > summary { border-bottom: 1px solid #E0D9CF; }
 .cond-plegable .contrato-doc { padding: 12px 14px; }
+
+/* 2.2.0 · Avisos de campo «Falta», recuadro de pago de la señal y aviso de señal en el formulario */
+.falta-av { display: inline-block; font-size: 11.5px; font-weight: 700; color: #85200C; background: #FDE4E1; padding: 1px 7px; border-radius: 999px; margin-left: 4px; vertical-align: 1px; }
+.senal-box, .senal-aviso { background: #FFF8EC; border: 1px solid #E5D5BC; border-left: 5px solid #85200C; text-align: left; }
+.senal-box.ok { background: #E8F2EA; border-color: #9CC5A8; border-left-color: #1F5F3A; }
+.senal-est { margin-top: 10px; }
+.senal-preg { font-size: 14.5px; font-weight: 700; color: #1A1A1A; margin: 6px 0 8px; }
+.senal-msg { font-size: 14px; line-height: 1.45; color: #333; margin: 6px 0 8px; }
+.senal-msg.ok { color: #1F5F3A; font-weight: 700; }
+.senal-btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.senal-btns button { min-height: 44px; border-radius: 10px; font-size: 14.5px; font-weight: 700; padding: 8px 14px; cursor: pointer; flex: 1 1 160px; }
+.b-enl-firma { display: inline-block; color: #85200C; font-weight: 700; font-size: 13.5px; text-decoration: underline; padding: 4px 0; }

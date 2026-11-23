@@ -56,11 +56,12 @@
   function preparar() {
     var r = INFO.reserva, e = INFO.enviado, g = r.grupoDatos || {};
     if (e) { F = JSON.parse(JSON.stringify(e)); F.servMap = {}; (e.servicios || []).forEach(function (x) { F.servMap[x.fecha + '|' + x.servicio] = x.total; }); F.salaSet = {}; (e.salas || []).forEach(function (x) { F.salaSet[x.fecha + '|' + x.sala] = true; }); F.hayAlergias = (e.alergias || []).length > 0; F.alergias = F.alergias || [];
+      F.contacto = Object.assign({ responsable: r.responsable || '', telefono: r.telefono || '', email: r.email || '' }, F.contacto || {});
       F.habitaciones = Object.assign({ matrimonios: 0, comparten: 0, individual: 0, literas: 0, movilidad: 0, observaciones: '' }, F.habitaciones || {});
       if (F.habitaciones.movilidad) { F.habitaciones.comparten += F.habitaciones.movilidad; F.habitaciones.movilidad = 0; }
       F.consentimientos = F.consentimientos || { datos: false, imagenes: false, autorizacion: false }; return; }
     F = {
-      contacto: { telefono: r.telefono || '', email: r.email || '' },
+      contacto: { responsable: r.responsable || '', telefono: r.telefono || '', email: r.email || '' },
       grupo: { entidad: g.entidad || '', cif: g.cif || '', direccion: g.direccion || '', representante: g.representante || '', dni: g.dni || '', cargo: g.cargo || '' },
       personas: { adultos: r.personas || 0, ninos: 0, bebes: 0 },
       servMap: {}, salaSet: {},
@@ -87,8 +88,24 @@
       '<div class="stp"><button type="button" data-st="' + id + '" data-d="-1" aria-label="Quitar uno: ' + esc(titulo) + '">−</button><output id="o_' + id + '">' + valor + '</output>' +
       '<button type="button" data-st="' + id + '" data-d="1" aria-label="Añadir uno: ' + esc(titulo) + '">+</button></div></div>';
   }
-  function campo(id, etiqueta, valor, tipo, ro) {
-    return '<label class="f" for="' + id + '">' + etiqueta + '</label><input id="' + id + '" type="' + (tipo || 'text') + '" value="' + esc(valor) + '"' + (ro ? ' readonly' : ' autocomplete="off"') + '>';
+  function campo(id, etiqueta, valor, tipo, ro, ob) {
+    var v = String(valor == null ? '' : valor).trim();
+    return '<label class="f" for="' + id + '">' + etiqueta + (ob ? ' * <span class="falta-av" id="av_' + id + '"' + (v ? ' hidden' : '') + '>Falta</span>' : '') + '</label>' +
+      '<input id="' + id + '" type="' + (tipo || 'text') + '" value="' + esc(valor) + '"' + (ro ? ' readonly' : ' autocomplete="off"') + '>';
+  }
+  function eur(n) { n = Math.round((Number(n) || 0) * 100) / 100; return n.toLocaleString('es-ES', { minimumFractionDigits: n % 1 ? 2 : 0, maximumFractionDigits: 2, useGrouping: 'always' }) + ' €'; }
+  function avisoSenal() {
+    var s = INFO.senal;
+    if (!s || s.pagada || s.comprobante) return '';
+    var r = INFO.reserva || {};
+    var concepto = 'Señal – ' + (r.grupo || '') + ' – ' + (r.entrada ? legible(r.entrada) : '');
+    return '<div class="card senal-aviso"><div class="card-tit pri">Señal pendiente</div>' +
+      '<div class="hint" style="margin-bottom:6px">Para confirmar la reserva, recuerde abonar la señal' + (s.enlaceFirma ? ' y adjuntar el comprobante' : '') + ':</div>' +
+      (s.importe ? '<div class="pre-fila"><span>Importe</span><b>' + eur(s.importe) + '</b></div>' : '') +
+      (s.iban ? '<div class="pre-fila"><span>Cuenta (IBAN)</span><b>' + esc(s.iban) + '</b></div>' : '') +
+      '<div class="pre-fila"><span>Concepto</span><b>' + esc(concepto) + '</b></div>' +
+      (s.enlaceFirma ? '<div style="margin-top:8px"><a class="b-enl-firma" href="' + esc(s.enlaceFirma) + '">Ir a la página de presupuesto y condiciones para adjuntar el comprobante ›</a></div>' : '') +
+      '</div>';
   }
 
   function pintar() {
@@ -106,12 +123,15 @@
 
   function paso1() {
     var r = INFO.reserva, g = F.grupo, c = F.contacto;
-    return '<div><h2>Datos del grupo</h2><div class="hint">Los datos en gris ya los tiene la Casa. Revise y complete el resto.</div></div>' +
-      '<div class="card">' + campo('cGrupo', 'Grupo', r.grupo, 'text', true) + campo('cResp', 'Responsable', r.responsable || '', 'text', true) +
-      campo('cTel', 'Teléfono', c.telefono, 'tel') + campo('cEmail', 'Correo electrónico', c.email, 'email') + '</div>' +
-      '<div class="card"><div class="card-tit pri">Para la factura y el contrato</div>' +
+    return avisoSenal() +
+      '<div><h2>Datos del grupo</h2><div class="hint">Los datos en gris ya los tiene la Casa. Revise y complete el resto.</div></div>' +
+      '<div class="card">' + campo('cGrupo', 'Grupo', r.grupo, 'text', true) +
+      campo('cResp', 'Responsable', c.responsable != null ? c.responsable : (r.responsable || ''), 'text', false, true) +
+      campo('cTel', 'Teléfono', c.telefono, 'tel', false, true) +
+      campo('cEmail', 'Correo electrónico', c.email, 'email', false, true) + '</div>' +
+      '<div class="card"><div class="card-tit pri">Para la factura y el contrato (opcional)</div>' +
       campo('gEnt', 'Entidad (nombre legal)', g.entidad) + campo('gCif', 'CIF', g.cif) + campo('gDir', 'Dirección', g.direccion) +
-      campo('gRep', 'Representante que firma', g.representante) + campo('gDni', 'DNI del representante (recomendado)', g.dni) + campo('gCar', 'Cargo', g.cargo) + '</div>';
+      campo('gRep', 'Representante que firma', g.representante) + campo('gDni', 'DNI del representante', g.dni) + campo('gCar', 'Cargo', g.cargo) + '</div>';
   }
 
   function paso2() {
@@ -221,7 +241,7 @@
   function val(id) { var e = document.getElementById(id); return e ? e.value.trim() : null; }
   function leer() {
     if (paso === 1) {
-      F.contacto.telefono = val('cTel'); F.contacto.email = val('cEmail');
+      F.contacto.responsable = val('cResp'); F.contacto.telefono = val('cTel'); F.contacto.email = val('cEmail');
       F.grupo = { entidad: val('gEnt'), cif: val('gCif'), direccion: val('gDir'), representante: val('gRep'), dni: val('gDni'), cargo: val('gCar') };
     }
     if (paso === 2) {
@@ -233,6 +253,10 @@
   }
 
   function enlazar() {
+    ['cResp', 'cTel', 'cEmail'].forEach(function (id) {
+      var el = $('#' + id), av = $('#av_' + id);
+      if (el && av) el.oninput = function () { av.hidden = !!el.value.trim(); };
+    });
     $$('[data-st]').forEach(function (b) {
       b.onclick = function () {
         var k = b.dataset.st, d = +b.dataset.d;
