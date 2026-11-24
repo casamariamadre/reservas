@@ -3,7 +3,7 @@
   'use strict';
   var C = window.CONFIG || {};
   var DEMO = !C.API_URL;
-  var VERSION = '2.2.1';
+  var VERSION = '2.3.0';
   var VERSION_FECHA = '24/11/2026';
   var S = { clave: null, gestor: null, datos: null, mes: null, sinConexion: false, filtro: 'proximas', verCanceladas: false,
             relModo: 'todas', relDesde: '', relHasta: '', findesTodos: false };
@@ -180,7 +180,7 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
   }
 
   // ---------------- Navegación ----------------
-  var TITULOS = { calendario: 'Calendario', reservas: 'Reservas', nueva: 'Nueva reserva', editar: 'Editar reserva', reserva: 'Reserva', ficha: 'Ficha de la reserva', ajustes: 'Ajustes', admin: 'Administración', servicios: 'Servicios y datos', hoja: 'Hoja de estancia', formulario: 'Formulario del grupo', reparto: 'Reparto de habitaciones', habitaciones: 'Hoja de habitaciones', contrato: 'Condiciones' };
+  var TITULOS = { calendario: 'Calendario', reservas: 'Reservas', nueva: 'Nueva reserva', editar: 'Editar reserva', reserva: 'Reserva', gestionar: 'Gestionar', cocina: 'Cocina', ficha: 'Ficha de la reserva', ajustes: 'Ajustes', admin: 'Administración', servicios: 'Servicios y datos', hoja: 'Hoja de estancia', formulario: 'Formulario del grupo', reparto: 'Reparto de habitaciones', habitaciones: 'Hoja de habitaciones', contrato: 'Condiciones' };
   function ruta() {
     var h = location.hash.replace(/^#\/?/, '');
     var q = {}, partes = h.split('?');
@@ -207,12 +207,12 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
       if (nuevo) app.insertBefore(nuevo, menu);
     }).observe(vista, { childList: true });
   })();
-  function enlazarVolver(antes) {
+  function enlazarVolver(antes, destino) {
     var pie = vista.querySelector('.pie-form') || $('#app > .pie-form');  // 2.1.1: puede estar ya anclada
     var b = '<button type="button" class="btn borde js-volver">‹ Volver</button>';
-    if (pie) pie.insertAdjacentHTML('afterbegin', b);
+    if (pie) { if (!pie.querySelector('.js-volver')) pie.insertAdjacentHTML('afterbegin', b); }
     else vista.insertAdjacentHTML('beforeend', '<div class="pie-form pie-volver">' + b + '</div>');
-    $$('.js-volver').forEach(function (x) { x.onclick = function () { if (antes) antes(); volver(); }; });
+    $$('.js-volver').forEach(function (x) { x.onclick = function () { if (antes) antes(); if (destino) ir(destino); else volver(); }; });
   }
 
   function pintar() {
@@ -223,12 +223,14 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
     $('#tituloVista').textContent = TITULOS[r.vista] || '';
     document.body.setAttribute('data-vista', r.vista);
     $$('.menu button').forEach(function (b) {
-      b.classList.toggle('activo', b.dataset.ir === r.vista || (b.dataset.ir === 'reservas' && (r.vista === 'reserva' || r.vista === 'ficha' || r.vista === 'servicios' || r.vista === 'hoja' || r.vista === 'formulario' || r.vista === 'reparto' || r.vista === 'habitaciones' || r.vista === 'contrato')) || (b.dataset.ir === 'ajustes' && r.vista === 'admin'));
+      b.classList.toggle('activo', b.dataset.ir === r.vista || (b.dataset.ir === 'reservas' && (r.vista === 'reserva' || r.vista === 'gestionar' || r.vista === 'cocina' || r.vista === 'ficha' || r.vista === 'servicios' || r.vista === 'hoja' || r.vista === 'formulario' || r.vista === 'reparto' || r.vista === 'habitaciones' || r.vista === 'contrato')) || (b.dataset.ir === 'ajustes' && r.vista === 'admin'));
     });
     vista.scrollTop = 0; window.scrollTo(0, 0);
     switch (r.vista) {
       case 'reservas': return pintarReservas();
       case 'reserva': return pintarDetalle(r.id);
+      case 'gestionar': return pintarGestionar(r.id);
+      case 'cocina': return pintarCocina(r.id);
       case 'ficha': return pintarHojaFicha(r.id);
       case 'nueva': return pintarFormulario(null, r.q);
       case 'editar': return pintarFormulario(r.id, r.q);
@@ -856,18 +858,134 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
     return a.replace(/^Formulario: /, 'Formulario: ');
   }
 
+  /** 2.3.0: Día de la semana, fecha y hora (p. ej. «viernes 27/11/2026, 18:00»). */
+  function fechaCompleta(f, h) {
+    if (!f) return '—';
+    var sem = aFecha(f).toLocaleDateString('es-ES', { weekday: 'long' });
+    return sem + ' ' + legible(f) + (h ? ', ' + h : '');
+  }
+  /** 2.3.0: Resumen de personas (adultos y niños) de una reserva. */
+  function textoPersonas(r) {
+    var adMax = 0, niMax = 0, beMax = 0;
+    var fDat = r.formulario && r.formulario.datos;
+    (r.servicios || []).forEach(function (x) {
+      if (SALAS.indexOf(x.servicio) < 0) {
+        adMax = Math.max(adMax, x.adultos || 0);
+        niMax = Math.max(niMax, x.ninos || 0);
+        beMax = Math.max(beMax, x.bebes || 0);
+      }
+    });
+    if (!adMax && !niMax && !beMax && fDat && fDat.personas) {
+      adMax = fDat.personas.adultos || 0;
+      niMax = fDat.personas.ninos || 0;
+      beMax = fDat.personas.bebes || 0;
+    }
+    var ninosTot = niMax + beMax;
+    if (adMax || ninosTot) {
+      var tot = r.personas || (adMax + ninosTot);
+      var des = [adMax + ' adulto' + (adMax === 1 ? '' : 's')];
+      if (ninosTot) des.push(ninosTot + ' niño' + (ninosTot === 1 ? '' : 's'));
+      return tot + ' (' + des.join(' · ') + ')';
+    }
+    return (r.personas || 0) + ' persona' + ((r.personas || 0) === 1 ? '' : 's');
+  }
+
+  /** 2.3.0: FICHA (reserva/ID): solo una tarjeta de resumen para consultar y la barra inferior con Siguiente paso + 4 botones. */
   function pintarDetalle(id) {
     var r = reserva(id);
     if (!r) { vista.innerHTML = botonVolver() + '<div class="vacio">La reserva no existe.</div>'; enlazarVolver(); return; }
+    var q = ruta().q || {};
+    // Los enlaces con ?abrir=apartado (p. ej. desde los correos de aviso) abren directamente Gestionar con ese apartado desplegado
+    if (q.abrir) { location.replace('#/gestionar/' + encodeURIComponent(r.id) + '?abrir=' + encodeURIComponent(q.abrir)); return; }
     $('#tituloVista').textContent = r.grupo;
+    var tel = String(r.telefono || '').replace(/[^\d+]/g, '');
+    var bloq = tipo(r) === 'Bloqueo', canc = r.estado === 'Cancelada', aloj = tipo(r) === 'Alojamiento';
+    var pasos = (bloq || canc) ? [] : pasosReserva(r);
+    var sig = pasos.filter(function (p) { return p.sig && p.e !== 'ok' && !p.espera; })[0];
+    var idq = encodeURIComponent(r.id);
+
+    var estHtml = canc ? '<span class="etiqueta cancelada">Cancelada</span>'
+      : bloq ? '<span class="etiqueta tipo">Bloqueo</span>'
+      : r.estado === 'Provisional' ? '<span class="etiqueta provisional">Provisional</span>'
+      : '<span class="etiqueta">Confirmada</span>';
+
+    var nNoches = noches(r);
+    var respHtml = String(r.responsable || '').trim() ? esc(r.responsable) : '<b class="hf-rojo">Falta</b>';
+    var telHtml = String(r.telefono || '').trim() ? (tel ? '<a href="tel:' + esc(tel) + '">' + esc(r.telefono) + '</a>' : esc(r.telefono)) : '<b class="hf-rojo">Falta</b>';
+    var mailHtml = String(r.email || '').trim() ? '<a href="mailto:' + esc(r.email) + '">' + esc(r.email) + '</a>' : '<b class="hf-rojo">Falta</b>';
+
+    var nHabs = (r.asignaciones || []).length;
+    var persHabTxt = esc(textoPersonas(r)) + (aloj && nHabs ? ' · ' + nHabs + ' hab. (' + pernoctan(r) + ' pernoctan)' : '');
+
+    var fDat = r.formulario && r.formulario.datos;
+    var aler = (r.alergias && r.alergias.length) ? r.alergias : ((fDat && fDat.alergias) || []);
+    var alerHtml = aler.length
+      ? '<span class="ficha-ambar">' + aler.length + (aler.length === 1 ? ' persona' : ' personas') + '</span>'
+      : 'Sin alergias';
+
+    var fz = senalPagada(r), fi = r.firma;
+    var senalHtml = fz.pagada ? '<span class="ficha-ok">Pagada</span>'
+      : (fi && fi.comprobante) ? '<span class="ficha-ambar">Comprobante recibido</span>'
+      : 'Pendiente';
+
+    var nPend = pasos.filter(function (p) { return p.e !== 'ok'; }).length;
+    var faltaHtml = nPend ? '<span class="ficha-ambar">' + nPend + (nPend === 1 ? ' paso' : ' pasos') + '</span>'
+      : '<span class="ficha-ok">Completa</span>';
+
+    vista.innerHTML =
+      '<div class="tarjeta ficha-res ' + clases(r) + '">' +
+        '<div class="ficha-cab"><h2>' + esc(r.grupo) + '</h2>' + estHtml + '</div>' +
+        '<div class="dato"><span>Entrada:</span><span>' + esc(fechaCompleta(r.entrada, r.horaEntrada)) + '</span></div>' +
+        '<div class="dato"><span>Salida:</span><span>' + esc(fechaCompleta(r.salida, r.horaSalida)) + '</span></div>' +
+        (aloj ? '<div class="dato"><span>Noches</span><span>' + nNoches + (nNoches === 1 ? ' noche' : ' noches') + '</span></div>' : '') +
+        (!bloq ? (
+          '<div class="dato"><span>Responsable</span><span>' + respHtml + '</span></div>' +
+          '<div class="dato"><span>Teléfono</span><span>' + telHtml + '</span></div>' +
+          '<div class="dato"><span>Correo</span><span>' + mailHtml + '</span></div>' +
+          '<div class="dato"><span>Personas' + (aloj && nHabs ? ' y hab.' : '') + '</span><span>' + persHabTxt + '</span></div>' +
+          '<div class="dato"><span>Alergias</span><span>' + alerHtml + '</span></div>' +
+          '<div class="dato"><span>Señal</span><span>' + senalHtml + '</span></div>' +
+          (!canc ? '<div class="dato"><span>Falta:</span><span>' + faltaHtml + '</span></div>' : '')
+        ) : '') +
+        (r.observaciones ? '<div class="dato"><span>Observaciones</span><span>' + esc(r.observaciones) + '</span></div>' : '') +
+      '</div>' +
+      '<div class="pie-form pie-ficha">' +
+        (!bloq && !canc && sig ? '<button type="button" class="btn ancho pie-ficha-sig" id="dSig">Siguiente paso: ' + esc(sig.sig) + '</button>' : '') +
+        '<div class="pie-ficha-nav' + (bloq || canc ? ' tres' : '') + '">' +
+          '<button type="button" class="btn borde js-volver">‹ Volver</button>' +
+          '<button type="button" class="btn sec" id="dIrGestionar">Gestionar</button>' +
+          '<button type="button" class="btn sec" id="dImprimir">Imprimir</button>' +
+          (!bloq && !canc ? '<button type="button" class="btn sec" id="dIrCocina">Cocina</button>' : '') +
+        '</div>' +
+      '</div>';
+
+    enlazarVolver();
+    if ($('#dSig')) $('#dSig').onclick = function () {
+      if (sig.ap === 'condiciones' && sig.sig === 'Comprobar la señal') {
+        ir('gestionar/' + idq + '?abrir=condiciones');
+        if (sig.acc) sig.acc.fn();
+        return;
+      }
+      if (sig.acc && !sig.sigMarca) return sig.acc.fn();
+      if (sig.sigMarca === '' && sig.acc) return sig.acc.fn();
+      if (sig.sigMarca) return anotar(r, sig.sigMarca, '', 'Anotado');
+      if (sig.marca) return anotar(r, sig.marca.tipo, '', 'Anotado');
+    };
+    $('#dIrGestionar').onclick = function () { ir('gestionar/' + idq); };
+    $('#dImprimir').onclick = function () { ir('ficha/' + idq); };
+    if ($('#dIrCocina')) $('#dIrCocina').onclick = function () { ir('cocina/' + idq); };
+  }
+
+  /** 2.3.0: GESTIONAR (gestionar/ID): apartados plegables, Evolución, Bitácora plegada y Cancelar o borrar. «‹ Volver» regresa a la ficha. */
+  function pintarGestionar(id) {
+    var r = reserva(id);
+    if (!r) { vista.innerHTML = botonVolver() + '<div class="vacio">La reserva no existe.</div>'; enlazarVolver(); return; }
+    $('#tituloVista').textContent = 'Gestionar · ' + r.grupo;
     var q = ruta().q || {};
     var tel = String(r.telefono || '').replace(/[^\d+]/g, '');
     var bloq = tipo(r) === 'Bloqueo', canc = r.estado === 'Cancelada', aloj = tipo(r) === 'Alojamiento';
     var pasos = (bloq || canc) ? [] : pasosReserva(r);
-    // Siguiente paso: el primero que se puede hacer ahora (sin contar lo que espera al grupo)
-    var sig = pasos.filter(function (p) { return p.sig && p.e !== 'ok' && !p.espera; })[0];
     var ICON = { ok: '✓', ahora: '●', aviso: '!', pend: '○' };
-    // 2.1.2: la Evolución solo informa (al tocar una línea se abre su apartado); las acciones están en los apartados
     function botonesPaso(p, i) {
       var btns = [];
       if (!p) return '';
@@ -882,7 +1000,7 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
         '<div class="paso-t"><b>' + esc(p.t) + '</b> <span>' + esc(p.txt) + '</span>' + (p.cq ? '<small>' + esc(p.cq) + '</small>' : '') + '</div>' +
         (p.ap ? '<span class="paso-flecha" aria-hidden="true">›</span>' : '') + '</div>';
     }
-    var bit = r.bitacora || [], verTodo = S.bitTodo === r.id;
+    var bit = r.bitacora || [], verTodo = S.bitTodo === r.id, bitAbierta = S.bitAbierta === r.id || q.abrir === 'bitacora';
     var bitHtml = bit.length ? (verTodo ? bit : bit.slice(0, 5)).map(function (b) {
       return '<li><span class="bit-f">' + esc(marcaLegible(b.fecha)) + '</span><span class="bit-q">' + esc(b.gestor) + '</span><span class="bit-t">' + esc(textoBitacora(b)) + '</span></li>';
     }).join('') : '<li class="sub">Aún no hay anotaciones.</li>';
@@ -900,8 +1018,8 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
       '<div class="fila-btns" style="margin-top:10px">' + (tel && !canc ? '<a class="btn sec" href="tel:' + esc(tel) + '">Llamar</a>' : '') +
       (!canc ? '<button class="btn sec" id="dEditar">Editar datos</button>' : '') + '</div>' +
       (pasos[0] && pasos[0].acc ? botonesPaso(pasos[0], 0) : '');
-    function apartado(clave, titulo, resumen, cuerpo) {
-      return '<details class="apartado" data-ap="' + clave + '"' + (q.abrir === clave ? ' open' : '') + '><summary><b>' + titulo + '</b><span>' + resumen + '</span></summary><div class="ap-cuerpo">' + cuerpo + '</div></details>';
+    function apartado(clave, titulo, resumen, cuerpo, abierto) {
+      return '<details class="apartado" data-ap="' + clave + '"' + (q.abrir === clave || abierto ? ' open' : '') + '><summary><b>' + titulo + '</b><span>' + resumen + '</span></summary><div class="ap-cuerpo">' + cuerpo + '</div></details>';
     }
     var iCond = idxPaso('Presupuesto y condiciones'), iSen = idxPaso('Señal'), iForm = idxPaso('Formulario'), iPreAct = idxPaso('Presupuesto actualizado'), iLiq = idxPaso('Liquidación');
     var fTarjeta = (!bloq && !canc) ? tarjetaFormulario(r).replace(/^<div class="tarjeta"><h2>Formulario del grupo<\/h2>/, '').replace(/<\/div>$/, '') : '';
@@ -914,15 +1032,7 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
       (iPreAct >= 0 ? '<p class="sub" style="margin:14px 0 0"><b>Presupuesto actualizado:</b> ' + esc(pasos[iPreAct].txt) + (pasos[iPreAct].cq ? ' · <small>' + esc(pasos[iPreAct].cq) + '</small>' : '') + '</p>' + botonesPaso(pasos[iPreAct], iPreAct) : '')
     ) : '';
     vista.innerHTML = botonVolver() +
-      // Cabecera
-      '<div class="tarjeta exp-cab ' + clases(r) + '"><div class="exp-cab-top"><h2>' + esc(r.grupo) + '</h2>' +
-      (!pasos.length ? '<button type="button" class="btn sec mini" id="dImprimir">Imprimir</button>' : '') + '</div>' +
-      '<div class="exp-fechas">' + esc(diaSemana(r.entrada)) + ' ' + esc(r.horaEntrada) + ' → ' + esc(diaSemana(r.salida)) + ' ' + esc(r.horaSalida) +
-      (aloj ? ' · ' + noches(r) + ' noches' : '') + '</div>' + etiquetas(r) + '</div>' +
-      // Siguiente paso + botón Imprimir
-      (pasos.length ? '<div class="exp-sig">' + (sig ? '<span>Siguiente paso</span><div class="exp-sig-btns"><button class="btn" id="dSig">' + esc(sig.sig) + '</button><button type="button" class="btn sec" id="dImprimir">Imprimir</button></div>'
-        : '<span>' + (pasos.some(function (p) { return p.espera; }) ? 'Esperando respuesta del grupo.' : 'Todo al día.') + '</span><button type="button" class="btn sec" id="dImprimir">Imprimir</button>') + '</div>' : '') +
-      // Apartados plegados (2.2.0: Datos → Presupuesto y condiciones → Formulario → Habitaciones → Hoja de estancia)
+      // Apartados plegados (Datos → Presupuesto y condiciones → Formulario → Habitaciones → Hoja de estancia)
       apartado('datos', 'Datos de la reserva', esc(r.responsable || tipo(r)), datos) +
       (iCond >= 0 ? apartado('condiciones', 'Presupuesto y condiciones', esc(condResumen), condCuerpo) : '') +
       (fTarjeta ? apartado('formulario', 'Formulario del grupo', esc(iForm >= 0 ? pasos[iForm].txt : ''), fTarjeta) : '') +
@@ -932,18 +1042,20 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
       (!bloq && !canc ? apartado('estancia', 'Hoja de estancia', '', '<p class="sub" style="margin:0 0 10px">' + resumenServicios(r) + '</p>' +
         '<div class="fila-btns"><button class="btn sec" id="dServ">Servicios y datos</button><button class="btn sec" id="dHoja">Ver hoja de estancia</button></div>' +
         (iLiq >= 0 ? '<p class="sub" style="margin:14px 0 0"><b>Liquidación:</b> ' + esc(pasos[iLiq].txt) + (pasos[iLiq].cq ? ' · ' + esc(pasos[iLiq].cq) : '') + '</p>' + botonesPaso(pasos[iLiq], iLiq) : '')) : '') +
-      // Evolución (solo seguimiento)
+      // Evolución (solo seguimiento; al tocar una línea abre su apartado)
       (pasos.length ? '<div class="tarjeta exp-pasos"><h2>Evolución</h2>' + pasos.map(lineaPaso).join('') + '</div>' : '') +
-      // Bitácora
-      '<div class="tarjeta exp-bit"><h2>Bitácora</h2><ul class="bitacora">' + bitHtml + '</ul>' +
-      '<div class="fila-btns" style="margin-top:8px"><button class="btn sec" id="dNota">+ Añadir nota</button>' +
-      (bit.length > 5 ? '<button class="btn borde" id="dBitTodo">' + (verTodo ? 'Ver menos' : 'Ver todo (' + bit.length + ')') + '</button>' : '') + '</div></div>' +
+      // Bitácora plegada con número de anotaciones
+      apartado('bitacora', 'Bitácora (' + bit.length + ')', '', '<ul class="bitacora">' + bitHtml + '</ul>' +
+        '<div class="fila-btns" style="margin-top:8px"><button class="btn sec" id="dNota">+ Añadir nota</button>' +
+        (bit.length > 5 ? '<button class="btn borde" id="dBitTodo">' + (verTodo ? 'Ver menos' : 'Ver todo (' + bit.length + ')') + '</button>' : '') + '</div>', bitAbierta) +
       // Acciones finales
       '<details class="apartado peligro-ap"><summary><b>Cancelar o borrar</b><span></span></summary><div class="ap-cuerpo"><div class="fila-btns">' +
       (!canc ? '<button class="btn peligro" id="dCancelar">Cancelar reserva</button>' : '') +
       '<button class="btn peligro borde-p" id="dBorrar">Borrar</button></div></div></details>';
-    enlazarVolver();
-    // Pasos
+
+    enlazarVolver(null, 'reserva/' + encodeURIComponent(r.id));
+    var dBit = vista.querySelector('.apartado[data-ap="bitacora"]');
+    if (dBit) dBit.addEventListener('toggle', function () { S.bitAbierta = dBit.open ? r.id : null; });
     $$('[data-p][data-k]').forEach(function (b) {
       b.onclick = function () {
         var p = pasos[+b.dataset.p], k = b.dataset.k;
@@ -961,30 +1073,20 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
       l.onclick = abrir;
       l.onkeydown = function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); abrir(); } };
     });
-    if ($('#dSig')) $('#dSig').onclick = function () {
-      if (sig.ap === 'condiciones' && sig.sig === 'Comprobar la señal') {
-        var d = vista.querySelector('.apartado[data-ap="condiciones"]');
-        if (d) { d.open = true; d.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
-      }
-      if (sig.acc && !sig.sigMarca) return sig.acc.fn();
-      if (sig.sigMarca === '' && sig.acc) return sig.acc.fn();
-      if (sig.sigMarca) return anotar(r, sig.sigMarca, '', 'Anotado');
-      if (sig.marca) return anotar(r, sig.marca.tipo, '', 'Anotado');
-    };
-    if ($('#dImprimir')) $('#dImprimir').onclick = function () { ir('ficha/' + encodeURIComponent(r.id)); };
     if ($('#dEditar')) $('#dEditar').onclick = function () { ir('editar/' + encodeURIComponent(r.id)); };
     if ($('#dServ')) $('#dServ').onclick = function () { ir('servicios/' + encodeURIComponent(r.id)); };
     if ($('#dHoja')) $('#dHoja').onclick = function () { ir('hoja/' + encodeURIComponent(r.id) + '?modo=presupuesto'); };
     if (fTarjeta) enlazarFormulario(r);
     if ($('#dReparto')) $('#dReparto').onclick = function () { ir('reparto/' + encodeURIComponent(r.id)); };
     if ($('#dHojaHab')) $('#dHojaHab').onclick = function () { ir('habitaciones/' + encodeURIComponent(r.id)); };
-    if ($('#dBitTodo')) $('#dBitTodo').onclick = function () { S.bitTodo = verTodo ? null : r.id; pintarDetalle(r.id); };
+    if ($('#dBitTodo')) $('#dBitTodo').onclick = function () { S.bitTodo = verTodo ? null : r.id; S.bitAbierta = r.id; pintarGestionar(r.id); };
     $('#dNota').onclick = function () {
       modal('<p><b>Añadir nota a la bitácora</b></p><textarea class="entrada" id="notaTxt" maxlength="300" rows="3" placeholder="Por ejemplo: llamé al responsable; confirmará el número el lunes."></textarea>' +
         '<div class="fila-btns" style="margin-top:10px"><button class="btn borde" data-r="0">Volver</button><button class="btn" data-r="1">Guardar nota</button></div>', function (e, cerrar) {
         var b = e.target.closest('[data-r]'); if (!b) return;
         if (b.dataset.r === '0') return cerrar();
         var t = $('#notaTxt').value.trim(); if (!t) return toast('Escribe la nota.', true);
+        S.bitAbierta = r.id;
         cerrar(); anotar(r, 'nota', t, 'Nota guardada');
       });
       setTimeout(function () { var t = $('#notaTxt'); if (t) t.focus(); }, 50);
@@ -1003,6 +1105,67 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
     if ($('#dCancelar')) $('#dCancelar').onclick = accion('cancelarReserva', '¿Cancelar la reserva de <b>' + esc(r.grupo) + '</b>? Se quitará del calendario y quedará marcada como cancelada en la lista de reservas.', 'Sí, cancelar', 'Reserva cancelada');
     $('#dBorrar').onclick = accion('borrarReserva', '¿<b>Borrar</b> definitivamente «' + esc(r.grupo) + '»? Desaparecerá de la app, de la lista de reservas y del calendario. <b>No se puede deshacer.</b>' +
       (!canc ? '<br><br>Si solo se ha anulado, mejor usa «Cancelar reserva» para que quede constancia.' : ''), 'Sí, borrar', 'Reserva borrada');
+  }
+
+  /** 2.3.0: COCINA (cocina/ID): solo lectura, sin precios, teléfonos, correos ni nombres de ocupantes. */
+  function htmlCocina(r) {
+    var m = mapaServ(r), dias = diasDe(r);
+    var tDes = 0, tCom = 0, tCen = 0;
+    var filas = dias.map(function (t) {
+      function n(sv) {
+        var x = m[t + '|' + sv];
+        return x ? (x.adultos || 0) + (x.ninos || 0) + (x.bebes || 0) : 0;
+      }
+      var d = n('Desayuno'), c = n('Comida'), ce = n('Cena');
+      tDes += d; tCom += c; tCen += ce;
+      return '<tr><td class="l"><b>' + esc(diaCorto(t)) + '</b></td>' +
+        '<td class="r">' + (d ? d : '—') + '</td>' +
+        '<td class="r">' + (c ? c : '—') + '</td>' +
+        '<td class="r">' + (ce ? ce : '—') + '</td></tr>';
+    }).join('');
+    var fDat = r.formulario && r.formulario.datos;
+    var aler = (r.alergias && r.alergias.length) ? r.alergias : ((fDat && fDat.alergias) || []);
+    var alerHtml = aler.length ? '<ul class="coc-aler-lista">' + aler.map(function (a) {
+      var als = (a.alergenos || []).filter(Boolean).join(', ');
+      var ot = String(a.otras || '').trim();
+      var txt = [als, ot ? 'Otras: ' + ot : ''].filter(Boolean).join(' · ');
+      return '<li><b>Persona ' + esc(a.persona) + ':</b> ' + esc(txt) + '</li>';
+    }).join('') + '</ul>' : '<p class="sub" style="margin:0">Sin alergias indicadas.</p>';
+
+    return '<div class="cocina-wrap">' +
+      '<div class="tarjeta coc-cab"><h2>' + esc(r.grupo) + '</h2></div>' +
+      '<div class="tarjeta">' +
+        '<div class="dato"><span>Personas</span><span>' + esc(textoPersonas(r)) + '</span></div>' +
+        '<div class="dato"><span>Entrada</span><span>' + esc(fechaCompleta(r.entrada, r.horaEntrada)) + '</span></div>' +
+        '<div class="dato"><span>Salida</span><span>' + esc(fechaCompleta(r.salida, r.horaSalida)) + '</span></div>' +
+      '</div>' +
+      '<div class="tarjeta"><h2>Servicios</h2>' +
+        '<table class="hd-tabla coc-tabla">' +
+          '<tr><th class="l">Día</th><th class="r">Desayuno</th><th class="r">Comida</th><th class="r">Cena</th></tr>' +
+          filas +
+          '<tr class="coc-total"><td class="l"><b>Total</b></td><td class="r"><b>' + (tDes ? tDes : '—') + '</b></td><td class="r"><b>' + (tCom ? tCom : '—') + '</b></td><td class="r"><b>' + (tCen ? tCen : '—') + '</b></td></tr>' +
+        '</table>' +
+      '</div>' +
+      '<div class="tarjeta coc-aler"><h2>Alergias (' + aler.length + (aler.length === 1 ? ' persona' : ' personas') + ')</h2>' + alerHtml + '</div>' +
+      (r.observaciones ? '<div class="tarjeta"><h2>Observaciones</h2><p style="margin:0;white-space:pre-wrap">' + esc(r.observaciones) + '</p></div>' : '') +
+    '</div>';
+  }
+
+  function pintarCocina(id) {
+    var r = reserva(id);
+    if (!r) { vista.innerHTML = botonVolver() + '<div class="vacio">La reserva no existe.</div>'; enlazarVolver(); return; }
+    $('#tituloVista').textContent = 'Cocina · ' + r.grupo;
+    vista.innerHTML = htmlCocina(r) +
+      '<div class="pie-form pie-cocina">' +
+        '<button type="button" class="btn borde js-volver">‹ Volver</button>' +
+        '<button type="button" class="btn" id="cImprimir">Imprimir</button>' +
+      '</div>';
+    enlazarVolver(null, 'reserva/' + encodeURIComponent(r.id));
+    $('#cImprimir').onclick = function () {
+      var t = document.title; document.title = 'Cocina · ' + r.grupo;
+      document.body.classList.add('imprimiendo-hoja'); window.print();
+      setTimeout(function () { document.body.classList.remove('imprimiendo-hoja'); document.title = t; }, 800);
+    };
   }
 
   // ---------------- Formulario ----------------

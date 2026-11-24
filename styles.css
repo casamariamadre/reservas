@@ -694,3 +694,28 @@ main { padding-bottom: 16px; }
   body.imprimiendo-hoja .hf-evo { grid-template-columns: 1fr 1fr !important; }
   body.imprimiendo-hoja .hf-box, body.imprimiendo-hoja .hf-chip, body.imprimiendo-hoja .hf-est { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
+
+/* v2.3.0: Ficha reorganizada en tres pantallas (Ficha, Gestionar, Cocina) */
+.ficha-cab { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+.ficha-cab h2 { margin: 0; }
+.ficha-ambar { color: var(--prov); font-weight: 700; }
+.ficha-ok { color: var(--ok); font-weight: 700; }
+#app > .pie-form.pie-ficha { flex-direction: column; align-items: stretch; gap: 8px; }
+.pie-ficha-sig { min-height: 44px; padding: 10px 14px; font-size: 14.5px; }
+.pie-ficha-nav { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; width: 100%; }
+.pie-ficha-nav.tres { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.pie-ficha-nav .btn { min-height: 40px; padding: 8px 4px; font-size: 13.5px; white-space: nowrap; }
+#app > .pie-form.pie-cocina { justify-content: space-between; }
+#app > .pie-form.pie-cocina .btn { flex: 1 1 0; }
+.coc-cab h2 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 20px; color: var(--pri); }
+.coc-tabla th, .coc-tabla td { padding: 7px 6px; font-size: 14.5px; }
+.coc-tabla tr.coc-total td { border-top: 2px solid var(--pri); border-bottom: 0; font-size: 15px; }
+.coc-aler { border: 1.5px solid var(--prov); border-left: 5px solid var(--prov); background: #FFFBF2; }
+.coc-aler h2 { color: #7A4B00; margin-bottom: 8px; }
+.coc-aler-lista { list-style: none; margin: 0; padding: 0; }
+.coc-aler-lista li { padding: 6px 0; border-bottom: 1px solid #EFE4CC; font-size: 14.5px; line-height: 1.4; }
+.coc-aler-lista li:last-child { border-bottom: 0; padding-bottom: 0; }
+@media print {
+  body.imprimiendo-hoja .cocina-wrap .tarjeta { box-shadow: none; border: 1px solid #d5cbc2; break-inside: avoid; margin-bottom: 10px; }
+  body.imprimiendo-hoja .coc-aler { border-color: #B9770E; border-left: 4px solid #B9770E; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
