@@ -508,7 +508,7 @@ body[data-vista="calendario"] .cal-solo .semana { flex: 1 0 auto; min-height: 48
   body.imprimiendo-hoja, body.imprimiendo-hoja html { height: auto !important; overflow: visible !important; background: #fff !important; }
   body.imprimiendo-hoja #app { display: block !important; height: auto !important; }
   body.imprimiendo-hoja .barra, body.imprimiendo-hoja .menu, body.imprimiendo-hoja .aviso, body.imprimiendo-hoja .volver,
-  body.imprimiendo-hoja .hoja-barra, body.imprimiendo-hoja .toast, body.imprimiendo-hoja #app > div[style*="F2B705"] { display: none !important; }
+  body.imprimiendo-hoja .hoja-barra, body.imprimiendo-hoja .toast, body.imprimiendo-hoja .franja-pruebas, body.imprimiendo-hoja #app > div[style*="F2B705"] { display: none !important; }
   body.imprimiendo-hoja main { overflow: visible !important; padding: 0 !important; }
   body.imprimiendo-hoja .hoja-marco { overflow: visible; padding: 0; }
   body.imprimiendo-hoja .hoja-doc { box-shadow: none; max-width: none; padding: 0; font-size: 12pt; }
@@ -705,17 +705,178 @@ main { padding-bottom: 16px; }
 .pie-ficha-nav { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; width: 100%; }
 .pie-ficha-nav.tres { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .pie-ficha-nav .btn { min-height: 40px; padding: 8px 4px; font-size: 13.5px; white-space: nowrap; }
-#app > .pie-form.pie-cocina { justify-content: space-between; }
-#app > .pie-form.pie-cocina .btn { flex: 1 1 0; }
-.coc-cab h2 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 20px; color: var(--pri); }
-.coc-tabla th, .coc-tabla td { padding: 7px 6px; font-size: 14.5px; }
-.coc-tabla tr.coc-total td { border-top: 2px solid var(--pri); border-bottom: 0; font-size: 15px; }
-.coc-aler { border: 1.5px solid var(--prov); border-left: 5px solid var(--prov); background: #FFFBF2; }
-.coc-aler h2 { color: #7A4B00; margin-bottom: 8px; }
-.coc-aler-lista { list-style: none; margin: 0; padding: 0; }
-.coc-aler-lista li { padding: 6px 0; border-bottom: 1px solid #EFE4CC; font-size: 14.5px; line-height: 1.4; }
-.coc-aler-lista li:last-child { border-bottom: 0; padding-bottom: 0; }
-@media print {
-  body.imprimiendo-hoja .cocina-wrap .tarjeta { box-shadow: none; border: 1px solid #d5cbc2; break-inside: avoid; margin-bottom: 10px; }
-  body.imprimiendo-hoja .coc-aler { border-color: #B9770E; border-left: 4px solid #B9770E; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+/* ===================== v2.4.0: fase 1 (letra grande, navegación, botón Hoy, sin Cocina) ===================== */
+.franja-pruebas { flex: 0 0 auto; background: #F2B705; color: #3a2a00; font: 700 0.78rem/1.3 Arial, sans-serif; text-align: center; padding: 5px 8px; letter-spacing: .3px; }
+@media print { .franja-pruebas { display: none !important; } }
+
+/* 2.1.4 · Título de la barra superior: hasta 2 líneas con «…» */
+.barra .vista {
+  font-size: 1.0625rem;
+  line-height: 1.25;
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+}
+
+/* 2.1.5 · Tamaños que crecen con la letra del sistema (rem) y textos que se parten en dos líneas dentro de botones */
+body { font-size: 1rem; }
+h2 { font-size: 1.0625rem; overflow-wrap: anywhere; }
+h3 { font-size: 0.8125rem; }
+.sub { font-size: 0.875rem; overflow-wrap: anywhere; }
+.btn {
+  min-height: 48px;
+  padding: 10px 14px;
+  text-align: center;
+  line-height: 1.25;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.hoja-barra .fila-btns .btn { white-space: normal; flex: 1 1 130px; }
+
+/* 2.1.2 · Selectores de opciones (.segmento, .tres, .cuatro, .estado): flex-wrap y mínimo 44 px de alto */
+.segmento, .segmento.tres, .segmento.cuatro, .segmento.estado {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.segmento button, .segmento.cuatro button {
+  flex: 1 1 auto;
+  min-height: 44px;
+  padding: 8px 10px;
+  font-size: 0.875rem;
+  line-height: 1.2;
+  white-space: normal;
+  text-align: center;
+}
+
+/* 2.1.3 · Textos largos (correo, teléfono, nombre del grupo, observaciones) se parten en la línea siguiente */
+.dato { flex-wrap: wrap; gap: 4px 12px; }
+.dato span:first-child { flex: 0 0 auto; }
+.dato span:last-child { flex: 1 1 140px; min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
+.dato a, .ficha-cab h2, .reserva .info b, .rel-item, .fd-info, .paso-t, .bit-t, .apartado > summary b {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.reserva .info b { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.apartado > summary { flex-wrap: nowrap; }
+.apartado > summary b { min-width: 0; flex: 0 1 auto; }
+.apartado > summary span { min-width: 40px; }
+
+/* 2.1.1 · Barras de abajo (.pie-form, .pie-ficha, .pie-volver) */
+#app > .pie-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+#app > .pie-form .total {
+  flex: 0 0 100%;
+  width: 100%;
+  order: -1;
+  font-size: 0.8125rem;
+  line-height: 1.25;
+  color: var(--texto-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#app > .pie-form .total b { font-size: 0.9375rem; color: var(--texto); }
+#app > .pie-form .btn {
+  min-height: 48px;
+  white-space: normal;
+  line-height: 1.2;
+}
+#app > .pie-form .js-volver { flex: 1 1 96px; }
+#app > .pie-form .btn:not(.js-volver) { flex: 2 1 150px; }
+#app > .pie-form.pie-volver .js-volver { flex: 0 1 auto; min-width: 120px; }
+
+/* 2.2 · Ficha de la reserva: barra inferior con Siguiente paso + fila Volver / Gestionar (mitad y mitad) */
+#app > .pie-form.pie-ficha {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+#app > .pie-form.pie-ficha .pie-ficha-sig {
+  flex: 0 0 auto;
+  width: 100%;
+  min-height: 48px;
+  padding: 10px 14px;
+  font-size: 0.9375rem;
+  line-height: 1.25;
+  white-space: normal;
+}
+.pie-ficha-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+}
+#app > .pie-form.pie-ficha .pie-ficha-nav .btn,
+#app > .pie-form.pie-ficha .pie-ficha-nav .js-volver {
+  flex: 1 1 calc(50% - 4px);
+  min-height: 48px;
+  padding: 10px 12px;
+  font-size: 0.9375rem;
+  white-space: normal;
+}
+
+/* 2.5 · Botón «Hoy» siempre visible en el calendario y barra del mes fija arriba al desplazarse */
+.cal-solo .mes-cab {
+  position: sticky;
+  top: -12px;
+  z-index: 10;
+  background: var(--tarjeta);
+  padding: 6px 4px 8px;
+  margin: -6px -4px 6px;
+  border-bottom: 1px solid var(--linea);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mes-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.cal-solo .mes-cab h2 {
+  font-size: 1.0625rem;
+  margin: 0;
+  text-align: center;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.mes-cab .icono {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  font-size: 1.35rem;
+}
+.hoy-btn {
+  border: 0;
+  background: var(--pri);
+  color: #fff;
+  border-radius: 12px;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  min-height: 44px;
+  padding: 0 14px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Ajustes adicionales para letra grande en Servicios y Reparto */
+@media (max-width: 420px) {
+  .sv-fila { grid-template-columns: minmax(64px, auto) repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .sv-pers { gap: 6px; }
+  .rep-fila { flex-wrap: wrap; }
 }
